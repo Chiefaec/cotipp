@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef } from "react";
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
@@ -17,12 +16,11 @@ async function saveCfg(c) { try { await window.storage.set(SK_CFG, JSON.stringif
 
 async function sendRankingMail(cfg, player, rank, pot, eventTitle) {
   const { serviceId, templateId, publicKey } = cfg;
-  const prizeAmt = i => { if(!pot) return ""; if(i===0) return ` -> CHF ${(pot*.6).toFixed(2)}`; if(i===1) return ` -> CHF ${(pot*.3).toFixed(2)}`; if(i===2) return ` -> CHF ${(pot*.1).toFixed(2)}`; return ""; };
-  const medal = i => i===0?"1.":i===1?"2.":i===2?"3.":`${i+1}.`;
-  const rankingText = rank.map((p,i)=>`${medal(i)} ${p.name}: ${p.pts} Punkte${prizeAmt(i)}`).join("\n");
+  const prizes = computePrizes(rank, pot);
+  const rankingText = rank.map((p)=>`${p.rank}. ${p.name}: ${p.pts} Punkte${prizes[p.id]? ` -> CHF ${prizes[p.id].chf}`:""}`).join("\n");
   const myIdx = rank.findIndex(p=>p.id===player.id);
   const myPts = rank[myIdx]?.pts ?? 0;
-  const prizeText = myIdx>=0 && pot ? (prizeAmt(myIdx).replace(" -> ","")) : "";
+  const prizeText = prizes[player.id] ? `CHF ${prizes[player.id].chf}` : "";
   if(!window.emailjs) {
     await new Promise((res,rej)=>{
       const s=document.createElement("script");
@@ -84,6 +82,32 @@ const buildRank = (players, scores) => {
 const calcPot = (evId, players, paid, entryFee=10) => {
   const paidCount = players.filter(p=>(paid||{})[`${evId}_${p.id}`]).length;
   return paidCount * entryFee;
+};
+// Round to nearest 10 CHF
+const rnd10 = v => Math.round(v / 10) * 10;
+// Compute prize distribution respecting ties
+// Returns map: playerId -> { chf, label }
+const computePrizes = (rank, pot) => {
+  if(!pot || !rank.length) return {};
+  const out = {};
+  // Group by rank
+  const byRank = {};
+  rank.forEach(p => { (byRank[p.rank] = byRank[p.rank]||[]).push(p); });
+  const ranks = Object.keys(byRank).map(Number).sort((a,b)=>a-b);
+  // Pools: rank1=60%, rank2=30%, rank3=10%
+  const pools = [0.6, 0.3, 0.1];
+  let poolIdx = 0;
+  for(const r of ranks) {
+    if(poolIdx >= 3) break;
+    const players = byRank[r];
+    const count = players.length;
+    // Consume as many pools as there are players in this rank
+    let combined = 0;
+    for(let j=0; j<count && poolIdx<3; j++, poolIdx++) combined += pools[poolIdx];
+    const each = rnd10(pot * combined / count);
+    players.forEach(p => { out[p.id] = { chf: each, pct: Math.round(combined*100/count) }; });
+  }
+  return out;
 };
 const isOpen = dl => new Date(dl)>Date.now();
 const fmtDate = dl => new Date(dl).toLocaleString("de-CH",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
@@ -730,13 +754,7 @@ function RankingScreen({ data, session, setView, scores, openProfile, goHome }) 
   const myIdx = rank.findIndex(p=>p.id===session.pid);
   const solved=countSolved(data.events), total=countTotal(data.events);
 
-  const prize = i => {
-    if(!pot) return null;
-    if(i===0) return `CHF ${(pot*.6).toFixed(2)}`;
-    if(i===1) return `CHF ${(pot*.3).toFixed(2)}`;
-    if(i===2) return `CHF ${(pot*.1).toFixed(2)}`;
-    return null;
-  };
+  const prizes = computePrizes(rank, pot);
 
   return (
     <div className="wrap pe">
@@ -750,7 +768,7 @@ function RankingScreen({ data, session, setView, scores, openProfile, goHome }) 
         <div className="mypos" style={{cursor:"pointer"}} onClick={()=>openProfile(session.pid)}>
           <div className="mpl">Deine aktuelle Position</div>
           <div className="mpr">Platz {rank[myIdx].rank}</div>
-          <div className="mpp">{rank[myIdx].pts} Punkte{prize(rank[myIdx].rank-1)?` · ${prize(rank[myIdx].rank-1)}`:""} · Profil ansehen →</div>
+          <div className="mpp">{rank[myIdx].pts} Punkte{prizes[rank[myIdx].id]?` · CHF ${prizes[rank[myIdx].id].chf}`:""} · Profil ansehen →</div>
         </div>
       )}
 
@@ -766,7 +784,7 @@ function RankingScreen({ data, session, setView, scores, openProfile, goHome }) 
               <div className={`rpos ${pc}`}>{p.rank===1?"🥇":p.rank===2?"🥈":p.rank===3?"🥉":p.rank}</div>
               <div style={{flex:1}}>
                 <div className="rname">{p.name}{p.id===session.pid&&<span style={{marginLeft:8,fontSize:11,color:"var(--blue)",fontWeight:600}}>← Du</span>}</div>
-                {prize(p.rank-1)&&<div style={{fontSize:12,fontWeight:600,marginTop:2,color:p.rank===1?"var(--gold)":p.rank===2?"var(--silver)":"var(--bronze)"}}>{prize(p.rank-1)}</div>}
+                {prizes[p.id]&&<div style={{fontSize:12,fontWeight:600,marginTop:2,color:p.rank===1?"var(--gold)":p.rank===2?"var(--silver)":"var(--bronze)"}}>CHF {prizes[p.id].chf}</div>}
               </div>
               <div className={`rpts ${ptc}`}>{p.pts}</div>
               <div style={{fontSize:12,color:"var(--t3)"}}>›</div>
@@ -790,13 +808,7 @@ function ProfileScreen({ data, session, setView, scores, profilePid, goHome }) {
   const pot = data.events[0] ? calcPot(data.events[0].id, data.players, data.paid, data.events[0].entryFee||10) : 0;
   const isMe = session.pid === profilePid;
 
-  const prize = i => {
-    if(!pot) return null;
-    if(i===0) return `CHF ${(pot*.6).toFixed(2)}`;
-    if(i===1) return `CHF ${(pot*.3).toFixed(2)}`;
-    if(i===2) return `CHF ${(pot*.1).toFixed(2)}`;
-    return null;
-  };
+  const prizes = computePrizes(rank, pot);
 
   // Count correct answers
   let correct=0, evaluated=0;
@@ -822,9 +834,9 @@ function ProfileScreen({ data, session, setView, scores, profilePid, goHome }) {
             <div className="prof-stat-n">{evaluated>0?`${correct}/${evaluated}`:"–"}</div>
             <div className="prof-stat-l">Richtig</div>
           </div>
-          {pot>0&&myRankIdx>=0&&prize(myRankIdx)&&(
+          {pot>0&&myRankIdx>=0&&prizes[player.id]&&(
             <div className="prof-stat">
-              <div className="prof-stat-n" style={{fontSize:16}}>{prize(myRankIdx)}</div>
+              <div className="prof-stat-n" style={{fontSize:16}}>CHF {prizes[player.id].chf}</div>
               <div className="prof-stat-l">Gewinn</div>
             </div>
           )}
@@ -981,7 +993,7 @@ function AdminScreen({ data, persist, toast$, setView, scores, openProfile, cfg,
 
   const rank = buildRank(data.players, scores);
   const pot = data.events[0] ? calcPot(data.events[0].id, data.players, data.paid, data.events[0].entryFee||10) : 0;
-  const prize = i => { if(!pot) return null; if(i===0) return `CHF ${(pot*.6).toFixed(2)}`; if(i===1) return `CHF ${(pot*.3).toFixed(2)}`; if(i===2) return `CHF ${(pot*.1).toFixed(2)}`; return null; };
+  const prizes = computePrizes(rank, pot);
 
   const openAdminEvent = (evId, tab="solutions") => {
     setActiveEvId(evId);
@@ -1231,7 +1243,7 @@ function AdminScreen({ data, persist, toast$, setView, scores, openProfile, cfg,
       {activeEvTab==="ranking"&&(()=>{
         const evRank = buildRank(data.players, scores);
         const evPot = calcPot(activeEv.id, data.players, data.paid, activeEv.entryFee||10);
-        const evPrize = i => { if(!evPot) return null; if(i===0) return `CHF ${(evPot*.6).toFixed(2)}`; if(i===1) return `CHF ${(evPot*.3).toFixed(2)}`; if(i===2) return `CHF ${(evPot*.1).toFixed(2)}`; return null; };
+        const evPrizes = computePrizes(evRank, evPot);
         return (
           <div className="card">
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
@@ -1247,7 +1259,7 @@ function AdminScreen({ data, persist, toast$, setView, scores, openProfile, cfg,
                   <div className={`rpos ${pc}`}>{p.rank===1?"🥇":p.rank===2?"🥈":p.rank===3?"🥉":p.rank}</div>
                   <div style={{flex:1}}>
                     <div className="rname">{p.name}</div>
-                    {evPrize(p.rank-1)&&<div style={{fontSize:12,fontWeight:600,marginTop:2,color:p.rank===1?"var(--gold)":p.rank===2?"var(--silver)":"var(--bronze)"}}>{evPrize(p.rank-1)}</div>}
+                    {evPrizes[p.id]&&<div style={{fontSize:12,fontWeight:600,marginTop:2,color:p.rank===1?"var(--gold)":p.rank===2?"var(--silver)":"var(--bronze)"}}>CHF {evPrizes[p.id].chf}</div>}
                   </div>
                   <div className={`rpts ${ptc}`}>{p.pts}</div>
                   <div style={{fontSize:12,color:"var(--t3)"}}>›</div>
