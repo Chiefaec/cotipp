@@ -90,18 +90,29 @@ const rnd10 = v => Math.round(v / 10) * 10;
 const computePrizes = (rank, pot) => {
   if(!pot || !rank.length) return {};
   const out = {};
-  // Group by rank
+  const totalPlayers = rank.length;
+  // Special case: only 2 players → winner 2/3, second 1/3
+  if(totalPlayers === 2) {
+    const r1 = rank.filter(p=>p.rank===1);
+    const r2 = rank.filter(p=>p.rank!==1);
+    if(r1.length===1 && r2.length===1) {
+      r1.forEach(p=>{ out[p.id]={ chf:rnd10(pot*2/3), pct:67 }; });
+      r2.forEach(p=>{ out[p.id]={ chf:rnd10(pot*1/3), pct:33 }; });
+    } else {
+      rank.forEach(p=>{ out[p.id]={ chf:rnd10(pot/2), pct:50 }; });
+    }
+    return out;
+  }
+  // Normal: group by rank, pools 60/30/10
   const byRank = {};
   rank.forEach(p => { (byRank[p.rank] = byRank[p.rank]||[]).push(p); });
   const ranks = Object.keys(byRank).map(Number).sort((a,b)=>a-b);
-  // Pools: rank1=60%, rank2=30%, rank3=10%
   const pools = [0.6, 0.3, 0.1];
   let poolIdx = 0;
   for(const r of ranks) {
     if(poolIdx >= 3) break;
     const players = byRank[r];
     const count = players.length;
-    // Consume as many pools as there are players in this rank
     let combined = 0;
     for(let j=0; j<count && poolIdx<3; j++, poolIdx++) combined += pools[poolIdx];
     const each = rnd10(pot * combined / count);
@@ -311,7 +322,7 @@ select.inp{cursor:pointer}
 .bnav-item.active{color:var(--blue)}
 .bnav-item span:first-child{font-size:20px;line-height:1}
 .bnav-item span:last-child{font-size:9.5px;font-weight:600;letter-spacing:.3px}
-.app-content{padding-bottom:72px}
+.app-content{position:fixed;top:52px;left:0;right:0;bottom:60px;overflow-y:auto;-webkit-overflow-scrolling:touch}
 
 /* EVENT CARD (home) */
 .ev-card{background:var(--w);border:1px solid var(--b);border-radius:var(--r2);margin-bottom:14px;box-shadow:var(--sh);overflow:hidden;cursor:pointer;transition:box-shadow .15s,transform .1s}
@@ -367,6 +378,7 @@ export default function CoTipp() {
   const [toast, setToast] = useState({ msg:"", type:"ok", show:false });
   const tRef = useRef();
   const adminViewRef = useRef(null); // holds setAdminView from AdminScreen
+  const scrollRef = useRef(null);
 
   useEffect(()=>{ load().then(setData); loadCfg().then(setCfg); },[]);
   const persist = async next => { setData(next); await save(next); };
@@ -382,8 +394,10 @@ export default function CoTipp() {
   const scores = computeScores(data.events, data.answers, data.players);
 
   const openProfile = (pid) => { setProfilePid(pid); setView("profile"); };
-  const openEvent = (evId) => { setActiveEvId(evId); setView("event"); };
-  const goHome = () => setView("home");
+  const scrollTop = () => { if(scrollRef.current) scrollRef.current.scrollTop = 0; };
+  const openEvent = (evId) => { setActiveEvId(evId); setView("event"); scrollTop(); };
+  const goHome = () => { setView("home"); scrollTop(); };
+  const navTo = (v) => { setView(v); scrollTop(); };
 
   return (
     <>
@@ -402,13 +416,13 @@ export default function CoTipp() {
           </nav>
         )}
 
-        <div className={session && !session.isAdmin ? "app-content" : ""}>
+        <div className={session && !session.isAdmin ? "app-content" : ""} ref={session && !session.isAdmin ? scrollRef : null}>
           {view==="login"   && <LoginScreen   data={data} persist={persist} setSession={setSession} setView={setView} toast$={toast$} />}
           {view==="welcome" && <WelcomeScreen  data={data} session={session} setView={setView} />}
           {view==="home"    && !session?.isAdmin && <HomeScreen data={data} session={session} scores={scores} openEvent={openEvent} setView={setView} />}
           {view==="event"   && !session?.isAdmin && <EventScreen data={data} session={session} persist={persist} toast$={toast$} setView={setView} scores={scores} activeEvId={activeEvId} goHome={goHome} />}
-          {view==="ranking" && <RankingScreen  data={data} session={session} setView={setView} scores={scores} openProfile={openProfile} goHome={goHome} />}
-          {view==="profile" && <ProfileScreen  data={data} session={session} setView={setView} scores={scores} profilePid={profilePid} goHome={goHome} />}
+          {view==="ranking" && <RankingScreen  data={data} session={session} setView={navTo} scores={scores} openProfile={(pid)=>{setProfilePid(pid);navTo("profile");}} goHome={goHome} />}
+          {view==="profile" && <ProfileScreen  data={data} session={session} setView={navTo} scores={scores} profilePid={profilePid} goHome={goHome} />}
           {view==="admin"   && session?.isAdmin && <AdminScreen data={data} persist={persist} toast$={toast$} setView={setView} scores={scores} openProfile={openProfile} cfg={cfg} persistCfg={persistCfg} adminViewRef={adminViewRef} />}
         </div>
 
@@ -418,7 +432,7 @@ export default function CoTipp() {
             <button className={`bnav-item ${view==="home"||view==="event"?"active":""}`} onClick={goHome}>
               <span>🏠</span><span>Events</span>
             </button>
-            <button className={`bnav-item ${view==="ranking"||view==="profile"?"active":""}`} onClick={()=>setView("ranking")}>
+            <button className={`bnav-item ${view==="ranking"||view==="profile"?"active":""}`} onClick={()=>navTo("ranking")}>
               <span>🏅</span><span>Rangliste</span>
             </button>
           </nav>
