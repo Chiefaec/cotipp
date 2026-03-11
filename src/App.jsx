@@ -1,29 +1,19 @@
+
 import { useState, useEffect, useRef } from "react";
-import { fbLoad, fbSave, fbLoadCfg, fbSaveCfg, fbSubscribe } from "./firebase.js";
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
 const SK = "cotipp_v6";
 const SK_CFG = "cotipp_cfg";
-const DEF = { players: [], events: [], answers: {} };
+const DEF = { players: [], events: [], answers: {}, paid: {} };
 const DEF_CFG = { serviceId:"", templateId:"", publicKey:"", mailsSent:{} };
 async function load() {
-  try {
-    const d = await fbLoad();
-    return d ? { ...DEF, ...d } : DEF;
-  } catch { return DEF; }
+  try { const r = await window.storage.get(SK, true); return r ? JSON.parse(r.value) : DEF; } catch { return DEF; }
 }
-async function save(d) {
-  try { await fbSave(d); } catch(e) { console.error("save error", e); }
-}
+async function save(d) { try { await window.storage.set(SK, JSON.stringify(d), true); } catch {} }
 async function loadCfg() {
-  try {
-    const c = await fbLoadCfg();
-    return c ? { ...DEF_CFG, ...c } : DEF_CFG;
-  } catch { return DEF_CFG; }
+  try { const r = await window.storage.get(SK_CFG, true); return r ? {...DEF_CFG,...JSON.parse(r.value)} : DEF_CFG; } catch { return DEF_CFG; }
 }
-async function saveCfg(c) {
-  try { await fbSaveCfg(c); } catch(e) { console.error("saveCfg error", e); }
-}
+async function saveCfg(c) { try { await window.storage.set(SK_CFG, JSON.stringify(c), true); } catch {} }
 
 async function sendRankingMail(cfg, player, rank, pot, eventTitle) {
   const { serviceId, templateId, publicKey } = cfg;
@@ -82,7 +72,19 @@ const uid = () => Math.random().toString(36).slice(2,10);
 const ADMIN_PASS = "CoTipp2025";
 const hasSol = q => q.solution!==null && q.solution!==undefined && q.solution!=="";
 const totalPts = (pid, scores) => Object.entries(scores).filter(([k])=>k.startsWith(pid+"_")).reduce((s,[,v])=>s+(v||0),0);
-const buildRank = (players, scores) => [...players].map(p=>({...p,pts:totalPts(p.id,scores)})).sort((a,b)=>b.pts-a.pts);
+const buildRank = (players, scores) => {
+  const sorted = [...players].map(p=>({...p,pts:totalPts(p.id,scores)})).sort((a,b)=>b.pts-a.pts);
+  let rank=1;
+  return sorted.map((p,i)=>{
+    if(i>0 && p.pts<sorted[i-1].pts) rank=i+1;
+    return {...p, rank};
+  });
+};
+// Calculate pot from paid players per event
+const calcPot = (evId, players, paid, entryFee=10) => {
+  const paidCount = players.filter(p=>(paid||{})[`${evId}_${p.id}`]).length;
+  return paidCount * entryFee;
+};
 const isOpen = dl => new Date(dl)>Date.now();
 const fmtDate = dl => new Date(dl).toLocaleString("de-CH",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 const countSolved = evs => evs.reduce((s,ev)=>s+(ev.questions||[]).filter(hasSol).length,0);
@@ -278,6 +280,37 @@ select.inp{cursor:pointer}
 .toast.ok{border-color:#a8d8b8;color:var(--green)}
 .toast.err{border-color:#f0c0bc;color:var(--red)}
 .footer{text-align:center;padding:24px 16px 18px;font-size:10.5px;color:var(--t3);line-height:1.8}
+
+/* BOTTOM NAV */
+.bnav{position:fixed;bottom:0;left:0;right:0;z-index:200;background:rgba(255,255,255,.97);backdrop-filter:blur(20px);border-top:1px solid var(--b);display:flex;align-items:stretch;height:60px;box-shadow:0 -1px 0 var(--b)}
+.bnav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border:none;background:transparent;cursor:pointer;transition:all .15s;color:var(--t3);font-family:'Inter',sans-serif;padding:6px 0}
+.bnav-item.active{color:var(--blue)}
+.bnav-item span:first-child{font-size:20px;line-height:1}
+.bnav-item span:last-child{font-size:9.5px;font-weight:600;letter-spacing:.3px}
+.app-content{padding-bottom:72px}
+
+/* EVENT CARD (home) */
+.ev-card{background:var(--w);border:1px solid var(--b);border-radius:var(--r2);margin-bottom:14px;box-shadow:var(--sh);overflow:hidden;cursor:pointer;transition:box-shadow .15s,transform .1s}
+.ev-card:hover{box-shadow:var(--sh2);transform:translateY(-1px)}
+.ev-card-top{padding:18px 18px 14px}
+.ev-card-title{font-size:17px;font-weight:800;letter-spacing:-.3px;margin-bottom:3px}
+.ev-card-meta{font-size:12px;color:var(--t3);margin-bottom:10px}
+.ev-card-bot{padding:10px 18px;background:var(--s1);border-top:1px solid var(--b);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ev-status-open{color:var(--green);font-size:12px;font-weight:700}
+.ev-status-closed{color:var(--red);font-size:12px;font-weight:700}
+
+/* HOME HEADER */
+.home-header{background:linear-gradient(135deg,var(--blue),#004faa);border-radius:var(--r2);padding:20px 22px;margin-bottom:16px;color:#fff}
+.home-greeting{font-size:20px;font-weight:800;margin-bottom:2px}
+.home-sub{font-size:12px;opacity:.75}
+.home-stats{display:flex;gap:20px;margin-top:14px}
+.home-stat{text-align:center}
+.home-stat-n{font-size:20px;font-weight:800;font-family:'JetBrains Mono',monospace}
+.home-stat-l{font-size:9px;opacity:.7;text-transform:uppercase;letter-spacing:.6px}
+
+/* SINGLE EVENT VIEW */
+.ev-header{background:var(--w);border:1px solid var(--b);border-radius:var(--r2);padding:18px;margin-bottom:14px;box-shadow:var(--sh)}
+.ev-back{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--blue);cursor:pointer;margin-bottom:14px;background:none;border:none;padding:0}
 `;
 
 function Countdown({ deadline }) {
@@ -304,19 +337,14 @@ export default function CoTipp() {
   const [data, setData] = useState(null);
   const [cfg, setCfg] = useState(null);
   const [session, setSession] = useState(null);
-  const [view, setView] = useState("login");  // login|welcome|events|ranking|profile|admin
+  const [view, setView] = useState("login");  // login|welcome|home|event|ranking|profile|admin
   const [profilePid, setProfilePid] = useState(null);
+  const [activeEvId, setActiveEvId] = useState(null);
   const [toast, setToast] = useState({ msg:"", type:"ok", show:false });
   const tRef = useRef();
+  const adminViewRef = useRef(null); // holds setAdminView from AdminScreen
 
-  useEffect(()=>{
-    // Initial load
-    load().then(d => setData(d));
-    loadCfg().then(c => setCfg(c));
-    // Realtime subscription - all players see updates instantly
-    const unsub = fbSubscribe(d => setData({ ...DEF, ...d }));
-    return () => unsub();
-  },[]);
+  useEffect(()=>{ load().then(setData); loadCfg().then(setCfg); },[]);
   const persist = async next => { setData(next); await save(next); };
   const toast$ = (msg, type="ok") => {
     if(tRef.current) clearTimeout(tRef.current);
@@ -330,6 +358,8 @@ export default function CoTipp() {
   const scores = computeScores(data.events, data.answers, data.players);
 
   const openProfile = (pid) => { setProfilePid(pid); setView("profile"); };
+  const openEvent = (evId) => { setActiveEvId(evId); setView("event"); };
+  const goHome = () => setView("home");
 
   return (
     <>
@@ -337,30 +367,40 @@ export default function CoTipp() {
       <div className="app">
         {session && (
           <nav className="nav">
-            <div className="nav-logo">
+            <div className="nav-logo" onClick={()=>!session?.isAdmin&&goHome()} style={{cursor:session?.isAdmin?"default":"pointer"}}>
               <span className="nb">CoTipp</span>
               <span className="nt">Wett / Spiel App für Sportfans</span>
             </div>
             <div className="nav-r">
-              {session.isAdmin && <span className="chip cadmin">⚙ Admin</span>}
-              {!session.isAdmin && <>
-                <button className="btn bg bsm" onClick={()=>setView("events")}>🎯 Tipps</button>
-                <button className="btn bg bsm" onClick={()=>setView("ranking")}>🏅 Rangliste</button>
-              </>}
-              {session.isAdmin && <button className="btn bg bsm" onClick={()=>setView("ranking")}>🏅 Rangliste</button>}
+              {session.isAdmin && <button className="btn bg bsm" style={{fontSize:17,padding:"5px 11px",lineHeight:1}} title="Einstellungen" onClick={()=>adminViewRef.current&&adminViewRef.current("settings")}>⚙️</button>}
               <button className="btn bg bsm" onClick={()=>{ setSession(null); setView("login"); }}>Abmelden</button>
             </div>
           </nav>
         )}
 
-        {view==="login"   && <LoginScreen   data={data} persist={persist} setSession={setSession} setView={setView} toast$={toast$} />}
-        {view==="welcome" && <WelcomeScreen  data={data} session={session} setView={setView} />}
-        {view==="events"  && !session?.isAdmin && <EventsScreen data={data} session={session} persist={persist} toast$={toast$} setView={setView} scores={scores} />}
-        {view==="ranking" && <RankingScreen  data={data} session={session} setView={setView} scores={scores} openProfile={openProfile} />}
-        {view==="profile" && <ProfileScreen  data={data} session={session} setView={setView} scores={scores} profilePid={profilePid} />}
-        {view==="admin"   && session?.isAdmin && <AdminScreen data={data} persist={persist} toast$={toast$} setView={setView} scores={scores} openProfile={openProfile} cfg={cfg} persistCfg={persistCfg} />}
+        <div className={session && !session.isAdmin ? "app-content" : ""}>
+          {view==="login"   && <LoginScreen   data={data} persist={persist} setSession={setSession} setView={setView} toast$={toast$} />}
+          {view==="welcome" && <WelcomeScreen  data={data} session={session} setView={setView} />}
+          {view==="home"    && !session?.isAdmin && <HomeScreen data={data} session={session} scores={scores} openEvent={openEvent} setView={setView} />}
+          {view==="event"   && !session?.isAdmin && <EventScreen data={data} session={session} persist={persist} toast$={toast$} setView={setView} scores={scores} activeEvId={activeEvId} goHome={goHome} />}
+          {view==="ranking" && <RankingScreen  data={data} session={session} setView={setView} scores={scores} openProfile={openProfile} goHome={goHome} />}
+          {view==="profile" && <ProfileScreen  data={data} session={session} setView={setView} scores={scores} profilePid={profilePid} goHome={goHome} />}
+          {view==="admin"   && session?.isAdmin && <AdminScreen data={data} persist={persist} toast$={toast$} setView={setView} scores={scores} openProfile={openProfile} cfg={cfg} persistCfg={persistCfg} adminViewRef={adminViewRef} />}
+        </div>
 
-        <div className="footer">© {new Date().getFullYear()} Colin Aeschbacher — Alle Rechte vorbehalten · CoTipp®</div>
+        {/* Bottom nav for players */}
+        {session && !session.isAdmin && view !== "login" && view !== "welcome" && (
+          <nav className="bnav">
+            <button className={`bnav-item ${view==="home"||view==="event"?"active":""}`} onClick={goHome}>
+              <span>🏠</span><span>Events</span>
+            </button>
+            <button className={`bnav-item ${view==="ranking"||view==="profile"?"active":""}`} onClick={()=>setView("ranking")}>
+              <span>🏅</span><span>Rangliste</span>
+            </button>
+          </nav>
+        )}
+
+        <div className="footer" style={{paddingBottom: session&&!session.isAdmin ? 80 : 24}}>© {new Date().getFullYear()} Colin Aeschbacher — Alle Rechte vorbehalten · CoTipp®</div>
       </div>
       <Toast {...toast} />
     </>
@@ -385,8 +425,7 @@ function LoginScreen({ data, persist, setSession, setView, toast$ }) {
       setSession({ pid:p.id, isAdmin:false, name:p.name });
       setView("welcome"); toast$(`Willkommen zurück, ${p.name}! 👋`); return;
     }
-    // New player → needs email
-    if(!email.trim()) return toast$("Bitte E-Mail eingeben (für Schluss-Mail)","err");
+    // New player → email is optional
     p = { id:uid(), name:n, email:email.trim() };
     await persist({ ...data, players:[...data.players, p] });
     setSession({ pid:p.id, isAdmin:false, name:p.name });
@@ -401,8 +440,10 @@ function LoginScreen({ data, persist, setSession, setView, toast$ }) {
       <div className="lc">
         <div className="lb">CoTipp</div>
         <div className="ls">Wett / Spiel App für Sportfans</div>
-        <div className="field"><label>Dein Name</label>
+        <div className="field">
+          <label>Dein Vor- und Nachname</label>
           <input className="inp" placeholder="Max Mustermann" value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()} />
+          <div style={{fontSize:11,color:"var(--t3)",marginTop:5}}>Bitte Vor- und Nachname eingeben, damit du in der Rangliste erkannt wirst.</div>
         </div>
         {!isAdmin && !known && (
           <div className="field">
@@ -432,7 +473,7 @@ function LoginScreen({ data, persist, setSession, setView, toast$ }) {
 
 // ─── WELCOME ──────────────────────────────────────────────────────────────────
 function WelcomeScreen({ data, session, setView }) {
-  const pot = Number(data.events[0]?.potCHF)||0;
+  const pot = data.events[0] ? calcPot(data.events[0].id, data.players, data.paid, data.events[0].entryFee||10) : 0;
   const prizes = [
     {ico:"🥇",label:"1. Platz – Gewinner",pct:60,c:"var(--gold)"},
     {ico:"🥈",label:"2. Platz",pct:30,c:"var(--silver)"},
@@ -440,10 +481,31 @@ function WelcomeScreen({ data, session, setView }) {
   ];
   return (
     <div className="wrap pe">
-      <div style={{fontSize:24,fontWeight:800,letterSpacing:"-.4px",marginBottom:4}}>👋 Willkommen, {session.name}!</div>
-      <div className="tm" style={{marginBottom:20}}>Hier sind die Spielregeln und Preisverteilung.</div>
+      <div style={{fontSize:24,fontWeight:800,letterSpacing:"-.4px",marginBottom:8}}>👋 Herzlich willkommen, {session.name}!</div>
+
+      <div className="card" style={{marginBottom:18,background:"linear-gradient(135deg,#e8f4ff,#f0ffe8)"}}>
+        <div style={{fontSize:15,fontWeight:800,marginBottom:8}}>🤼 Die Wett & Spiel App von COAE</div>
+        <div style={{fontSize:13.5,color:"var(--t2)",lineHeight:1.7}}>
+          Diese App wurde im Zuge der <strong>Schwingerkarriere von RT69</strong> entwickelt –
+          dem Mann, der Sägemehl atmet und Gegner wie Baumstämme umwirft 🪵💪 – und dessen <strong>Brücke</strong> so unerschütterlich ist, dass Gegner schon aufgehört haben zu drücken und einfach warten bis er wieder aufsteht. 🌉👑
+        </div>
+        <div style={{fontSize:13,color:"var(--t3)",marginTop:10,lineHeight:1.7}}>
+          Hier hast du als Fan endlich die Plattform für <strong>Spiel, Wetten und Spass</strong> –
+          weil zuschauen alleine langweilig ist. Tippe richtig, kletter die Rangliste hoch
+          und beweise, dass du RT69 besser kennst als er sich selbst. 🏆
+        </div>
+        <div style={{fontSize:12,color:"var(--t3)",marginTop:8,fontStyle:"italic"}}>
+          (Keine Garantie auf Richtigkeit der Tipps. Verluste werden kommentarlos akzeptiert.)
+        </div>
+      </div>
+
+      <div className="tm" style={{marginBottom:14,fontWeight:600}}>🎯 Preisverteilung & Spielregeln</div>
       <div className="pcard">
-        <div style={{fontWeight:700,fontSize:15,marginBottom:14}}>🏆 Preisverteilung{pot?` — Pot: CHF ${pot}`:""}</div>
+        <div style={{fontWeight:700,fontSize:15,marginBottom:6}}>🏆 Preisverteilung{pot?` — Pot: CHF ${pot}`:""}</div>
+        <div style={{fontSize:12,color:"var(--t3)",marginBottom:14,lineHeight:1.6}}>
+          Wer am meisten weiss, kassiert. Wer am wenigsten weiss, zahlt Lehrgeld –
+          und darf nächstes Mal wieder mitmachen. So funktioniert Freundschaft. 🤝
+        </div>
         {prizes.map(({ico,label,pct,c},i)=>(
           <div key={i} className="prow">
             <div className="pico">{ico}</div>
@@ -454,92 +516,90 @@ function WelcomeScreen({ data, session, setView }) {
             </div>
           </div>
         ))}
+        <div style={{fontSize:11.5,color:"var(--t3)",marginTop:14,lineHeight:1.7,fontStyle:"italic"}}>
+          📜 Regel 1: Tippe vor der Deadline – danach ist kein Jammern erlaubt.<br/>
+          📜 Regel 2: Wer gewinnt, zahlt die nächste Runde. Steht zwar nirgends, gilt aber trotzdem.<br/>
+          📜 Regel 3: RT69 darf selbstverständlich mitmachen. Im Sägemehl unschlagbar – beim Tippen eine Gefahr für niemanden. 🏆🤷
+        </div>
       </div>
       <div className="flex">
-        <button className="btn bp" onClick={()=>setView("events")}>🎯 Jetzt tippen</button>
+        <button className="btn bp" onClick={()=>setView("home")}>🎯 Zu den Events</button>
         <button className="btn bg" onClick={()=>setView("ranking")}>🏅 Rangliste</button>
       </div>
     </div>
   );
 }
 
-// ─── EVENTS ───────────────────────────────────────────────────────────────────
-function EventsScreen({ data, session, persist, toast$, setView, scores }) {
-  if(!data.events.length) return (
-    <div className="wrap pe"><div className="empty"><div className="ei">📋</div><h3>Noch keine Events</h3><p>Der Admin hat noch kein Event erstellt.</p></div></div>
-  );
+// ─── HOME SCREEN ──────────────────────────────────────────────────────────────
+function HomeScreen({ data, session, scores, openEvent, setView }) {
+  const rank = buildRank(data.players, scores);
+  const myIdx = rank.findIndex(p=>p.id===session.pid);
+  const myEntry = rank[myIdx];
+  const myPts = totalPts(session.pid, scores);
+  const totalPot = data.events.reduce((s,ev)=>s+calcPot(ev.id,data.players,data.paid,ev.entryFee||10),0);
+  const pot = data.events[0] ? calcPot(data.events[0].id, data.players, data.paid, data.events[0].entryFee||10) : 0;
+
   return (
     <div className="wrap pe">
+      {/* Greeting header */}
+      <div className="home-header">
+        <div className="home-greeting">👋 Hallo, {session.name}!</div>
+        <div className="home-sub">Wähle ein Event und gib deine Tipps ab</div>
+        <div className="home-stats">
+          <div className="home-stat">
+            <div className="home-stat-n">{myPts}</div>
+            <div className="home-stat-l">Punkte</div>
+          </div>
+          {myIdx>=0&&<div className="home-stat">
+            <div className="home-stat-n">#{myEntry.rank}</div>
+            <div className="home-stat-l">Rang</div>
+          </div>}
+          {totalPot>0&&<div className="home-stat">
+            <div className="home-stat-n">CHF {totalPot}</div>
+            <div className="home-stat-l">Pot</div>
+          </div>}
+        </div>
+      </div>
+
+      {/* Event cards */}
+      <div style={{fontSize:16,fontWeight:800,letterSpacing:"-.2px",marginBottom:10,color:"var(--t2)"}}>📋 Laufende & kommende Events</div>
+      {!data.events.length && (
+        <div className="empty"><div className="ei">📋</div><h3>Noch keine Events</h3><p>Der Admin hat noch kein Event erstellt.</p></div>
+      )}
       {data.events.map(ev=>{
         const closed=!isOpen(ev.deadline);
         const qs=ev.questions||[];
         const answered=qs.filter(q=>{ const v=data.answers[`${session.pid}_${q.id}`]; return v!==undefined&&v!==""; }).length;
+        const solved=qs.filter(q=>hasSol(q)).length;
+        const evPts=qs.reduce((s,q)=>{ const k=`${session.pid}_${q.id}`; return s+(hasSol(q)?(scores[k]??0):0); },0);
+        const allAnswered=qs.length>0&&answered===qs.length;
         return (
-          <div key={ev.id}>
-            <div style={{marginBottom:16}}>
-              <div style={{fontSize:22,fontWeight:800,letterSpacing:"-.4px"}}>{ev.title}</div>
-              <div className="tm mt4">Pot: CHF {ev.potCHF} · {qs.length} Fragen</div>
-            </div>
-            <div className={`dlbar ${closed?"cl":""}`}>
-              <span className="dllbl">{closed?"⛔ Tippeingabe geschlossen":"⏱ Noch Zeit bis Deadline:"}</span>
-              {closed?<span className="countdown">—</span>:<Countdown deadline={ev.deadline}/>}
-            </div>
-            {qs.length>0&&(
-              <div style={{marginBottom:14}}>
-                <div className="tm" style={{fontSize:12,marginBottom:4}}>{answered}/{qs.length} Fragen beantwortet</div>
-                <div className="prog mt4"><div className="progf" style={{width:`${qs.length?(answered/qs.length)*100:0}%`}}/></div>
+          <div key={ev.id} className="ev-card" onClick={()=>openEvent(ev.id)}>
+            <div className="ev-card-top">
+              <div className="ev-card-title">{ev.title}</div>
+              <div className="ev-card-meta">
+                {closed?"Deadline abgelaufen":"Deadline: "}{!closed&&fmtDate(ev.deadline)}
+                {` · Pot: CHF ${calcPot(ev.id,data.players,data.paid,ev.entryFee||10)}`}
               </div>
-            )}
-            {qs.map((q,i)=>{
-              const key=`${session.pid}_${q.id}`;
-              const cur=data.answers[key];
-              const solved=hasSol(q);
-              const pts=solved?(scores[key]??0):null;
-              const correct=solved&&pts>0;
-              return (
-                <div key={q.id} className="qc">
-                  <div className="qh">
-                    <div className="qn">{i+1}</div>
-                    <div className="qt">{q.text}</div>
-                    <div className="qp">{q.points} Pt.</div>
+              {/* Progress bar */}
+              {qs.length>0&&(
+                <div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--t3)",marginBottom:4}}>
+                    <span>{answered}/{qs.length} Tipps abgegeben</span>
+                    {solved>0&&<span style={{color:"var(--green)",fontWeight:600}}>{evPts} Punkte erzielt</span>}
                   </div>
-                  {q.type==="choice"&&(
-                    <div className="cg">
-                      {q.options.map((opt,oi)=>{
-                        let cls=cur===opt?"sel":"";
-                        if(solved){ if(opt===q.solution)cls="cor"; else if(opt===cur)cls="wrg"; }
-                        return (
-                          <button key={oi} disabled={closed||solved} className={`cb ${cls}`}
-                            onClick={async()=>{ await persist({...data,answers:{...data.answers,[key]:opt}}); toast$("Tipp gespeichert ✓"); }}>
-                            {opt}{solved&&opt===q.solution?" ✓":""}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                  {(q.type==="text"||q.type==="number")&&(
-                    <input className="inp" type={q.type==="number"?"number":"text"}
-                      placeholder={q.type==="number"?"Zahl eingeben…":"Antwort eingeben…"}
-                      defaultValue={cur||""} disabled={closed||solved}
-                      onBlur={async e=>{
-                        if(closed||solved) return;
-                        const v=e.target.value.trim(); if(!v) return;
-                        await persist({...data,answers:{...data.answers,[key]:v}}); toast$("Tipp gespeichert ✓");
-                      }}/>
-                  )}
-                  {cur&&!solved&&<div className="ab mt8">✓ Dein Tipp: <strong>{cur}</strong></div>}
-                  {solved&&(
-                    <div className="flex mt8" style={{gap:8,flexWrap:"wrap"}}>
-                      <span style={{fontSize:12,color:"var(--t3)"}}>Lösung: <strong style={{color:"var(--green)"}}>{q.solution}</strong>{q.type==="number"&&` (±${q.tolerance})`}</span>
-                      {cur
-                        ?<span className={`sb ${correct?"sbw":"sbl"}`}>{correct?`✓ +${pts} Punkte`:`✗ 0 Pt. (dein Tipp: ${cur})`}</span>
-                        :<span className="sb sbl">✗ Kein Tipp – 0 Punkte</span>}
-                    </div>
-                  )}
+                  <div className="prog"><div className="progf" style={{width:`${qs.length?(answered/qs.length)*100:0}%`}}/></div>
                 </div>
-              );
-            })}
-            <button className="btn bo bsm mt8" onClick={()=>setView("ranking")}>🏅 Zur Rangliste</button>
+              )}
+            </div>
+            <div className="ev-card-bot">
+              <span className={closed?"ev-status-closed":"ev-status-open"}>
+                {closed?"⛔ Geschlossen":"● Offen"}
+              </span>
+              {!closed&&<span style={{fontSize:12,color:"var(--t3)"}}>⏱ <Countdown deadline={ev.deadline}/></span>}
+              {allAnswered&&!closed&&<span className="chip cgreen" style={{fontSize:10}}>✓ Alle Tipps abgegeben</span>}
+              <span style={{fontSize:13,color:"var(--blue)",fontWeight:600}}>Öffnen →</span>
+            </div>
           </div>
         );
       })}
@@ -547,10 +607,126 @@ function EventsScreen({ data, session, persist, toast$, setView, scores }) {
   );
 }
 
+// ─── TEXT INPUT WITH CONFIRM ─────────────────────────────────────────────────
+function TextInput({ initial, type, onSave }) {
+  const [val, setVal] = useState(initial);
+  const [saved, setSaved] = useState(!!initial);
+  const save = async () => {
+    const v = String(val).trim();
+    if(!v) return;
+    await onSave(v);
+    setSaved(true);
+  };
+  return (
+    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+      <input
+        className="inp"
+        type={type==="number"?"number":"text"}
+        placeholder={type==="number"?"Zahl eingeben…":"Antwort eingeben…"}
+        value={val}
+        onChange={e=>{ setVal(e.target.value); setSaved(false); }}
+        onKeyDown={e=>e.key==="Enter"&&save()}
+        style={{flex:1}}
+      />
+      <button
+        className={`btn bsm ${saved?"bg":"bp"}`}
+        onClick={save}
+        style={{flexShrink:0,minWidth:80}}
+      >
+        {saved?"✓ Gespeichert":"Bestätigen"}
+      </button>
+    </div>
+  );
+}
+
+// ─── SINGLE EVENT SCREEN ──────────────────────────────────────────────────────
+function EventScreen({ data, session, persist, toast$, setView, scores, activeEvId, goHome }) {
+  const ev = data.events.find(e=>e.id===activeEvId);
+  if(!ev) return <div className="wrap pe"><div className="empty"><div className="ei">📋</div><h3>Event nicht gefunden</h3></div></div>;
+
+  const closed=!isOpen(ev.deadline);
+  const qs=ev.questions||[];
+  const answered=qs.filter(q=>{ const v=data.answers[`${session.pid}_${q.id}`]; return v!==undefined&&v!==""; }).length;
+
+  return (
+    <div className="wrap pe">
+      <button className="ev-back" onClick={goHome}>← Alle Events</button>
+      <div className="ev-header">
+        <div style={{fontSize:20,fontWeight:800,letterSpacing:"-.3px",marginBottom:4}}>{ev.title}</div>
+        <div className="tm" style={{marginBottom:10}}>Pot: CHF {calcPot(ev.id,data.players,data.paid,ev.entryFee||10)} · {qs.length} Fragen</div>
+        <div className={`dlbar ${closed?"cl":""}`} style={{marginBottom:0}}>
+          <span className="dllbl">{closed?"⛔ Tippeingabe geschlossen":"⏱ Noch Zeit:"}</span>
+          {closed?<span className="countdown">—</span>:<Countdown deadline={ev.deadline}/>}
+        </div>
+        {qs.length>0&&(
+          <div style={{marginTop:10}}>
+            <div style={{fontSize:11,color:"var(--t3)",marginBottom:4}}>{answered}/{qs.length} beantwortet</div>
+            <div className="prog"><div className="progf" style={{width:`${qs.length?(answered/qs.length)*100:0}%`}}/></div>
+          </div>
+        )}
+      </div>
+
+      {qs.map((q,i)=>{
+        const key=`${session.pid}_${q.id}`;
+        const cur=data.answers[key];
+        const solved=hasSol(q);
+        const pts=solved?(scores[key]??0):null;
+        const correct=solved&&pts>0;
+        return (
+          <div key={q.id} className="qc">
+            <div className="qh">
+              <div className="qn">{i+1}</div>
+              <div className="qt">{q.text}</div>
+              <div className="qp">{q.points} Pt.</div>
+            </div>
+            {q.type==="choice"&&(
+              <div className="cg">
+                {q.options.map((opt,oi)=>{
+                  let cls=cur===opt?"sel":"";
+                  if(solved){ if(opt===q.solution)cls="cor"; else if(opt===cur)cls="wrg"; }
+                  return (
+                    <button key={oi} disabled={closed||solved} className={`cb ${cls}`}
+                      onClick={async()=>{ await persist({...data,answers:{...data.answers,[key]:opt}}); toast$("Tipp gespeichert ✓"); }}>
+                      {opt}{solved&&opt===q.solution?" ✓":""}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {(q.type==="text"||q.type==="number")&&!solved&&!closed&&(
+              <TextInput
+                key={key}
+                initial={cur||""}
+                type={q.type}
+                onSave={async v=>{ await persist({...data,answers:{...data.answers,[key]:v}}); toast$("Tipp gespeichert ✓"); }}
+              />
+            )}
+            {(q.type==="text"||q.type==="number")&&(closed||solved)&&(
+              <input className="inp" type={q.type==="number"?"number":"text"}
+                value={cur||""} disabled readOnly/>
+            )}
+            {cur&&!solved&&!closed&&<div className="ab mt8" style={{marginTop:4}}>✓ Gespeichert: <strong>{cur}</strong></div>}
+            {solved&&(
+              <div className="flex mt8" style={{gap:8,flexWrap:"wrap"}}>
+                <span style={{fontSize:12,color:"var(--t3)"}}>Lösung: <strong style={{color:"var(--green)"}}>{q.solution}</strong>{q.type==="number"&&` (±${q.tolerance})`}</span>
+                {cur
+                  ?<span className={`sb ${correct?"sbw":"sbl"}`}>{correct?`✓ +${pts} Punkte`:`✗ 0 Pt. (dein Tipp: ${cur})`}</span>
+                  :<span className="sb sbl">✗ Kein Tipp – 0 Punkte</span>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {!qs.length&&<div className="empty"><div className="ei">❓</div><h3>Noch keine Fragen</h3><p>Der Admin hat noch keine Fragen hinzugefügt.</p></div>}
+      <button className="btn bo bsm mt8" onClick={()=>setView("ranking")}>🏅 Zur Rangliste</button>
+    </div>
+  );
+}
+
 // ─── RANKING ──────────────────────────────────────────────────────────────────
-function RankingScreen({ data, session, setView, scores, openProfile }) {
+function RankingScreen({ data, session, setView, scores, openProfile, goHome }) {
   const rank = buildRank(data.players, scores);
-  const pot = Number(data.events[0]?.potCHF)||0;
+  const pot = data.events[0] ? calcPot(data.events[0].id, data.players, data.paid, data.events[0].entryFee||10) : 0;
   const myIdx = rank.findIndex(p=>p.id===session.pid);
   const solved=countSolved(data.events), total=countTotal(data.events);
 
@@ -573,8 +749,8 @@ function RankingScreen({ data, session, setView, scores, openProfile }) {
       {!session.isAdmin && myIdx>=0 && (
         <div className="mypos" style={{cursor:"pointer"}} onClick={()=>openProfile(session.pid)}>
           <div className="mpl">Deine aktuelle Position</div>
-          <div className="mpr">Platz {myIdx+1}</div>
-          <div className="mpp">{rank[myIdx].pts} Punkte{prize(myIdx)?` · ${prize(myIdx)}`:""} · Profil ansehen →</div>
+          <div className="mpr">Platz {rank[myIdx].rank}</div>
+          <div className="mpp">{rank[myIdx].pts} Punkte{prize(rank[myIdx].rank-1)?` · ${prize(rank[myIdx].rank-1)}`:""} · Profil ansehen →</div>
         </div>
       )}
 
@@ -582,15 +758,15 @@ function RankingScreen({ data, session, setView, scores, openProfile }) {
         <div className="ctitle">Gesamtrangliste — {rank.length} Spieler</div>
         {rank.length===0&&<div className="empty"><div className="ei">🏅</div><h3>Noch keine Punkte</h3><p>Sobald der Admin Lösungen einträgt, erscheint hier die Rangliste.</p></div>}
         {rank.map((p,i)=>{
-          const pc=i===0?"rp1":i===1?"rp2":i===2?"rp3":"rpn";
-          const ptc=i===0?"rp1c":i===1?"rp2c":i===2?"rp3c":"rpnc";
+          const pc=p.rank===1?"rp1":p.rank===2?"rp2":p.rank===3?"rp3":"rpn";
+          const ptc=p.rank===1?"rp1c":p.rank===2?"rp2c":p.rank===3?"rp3c":"rpnc";
           return (
             <div key={p.id} className="rrow clickable" style={{animation:"fadeUp .3s ease both",animationDelay:`${i*40}ms`}}
               onClick={()=>openProfile(p.id)}>
-              <div className={`rpos ${pc}`}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":i+1}</div>
+              <div className={`rpos ${pc}`}>{p.rank===1?"🥇":p.rank===2?"🥈":p.rank===3?"🥉":p.rank}</div>
               <div style={{flex:1}}>
                 <div className="rname">{p.name}{p.id===session.pid&&<span style={{marginLeft:8,fontSize:11,color:"var(--blue)",fontWeight:600}}>← Du</span>}</div>
-                {prize(i)&&<div style={{fontSize:12,fontWeight:600,marginTop:2,color:i===0?"var(--gold)":i===1?"var(--silver)":"var(--bronze)"}}>{prize(i)}</div>}
+                {prize(p.rank-1)&&<div style={{fontSize:12,fontWeight:600,marginTop:2,color:p.rank===1?"var(--gold)":p.rank===2?"var(--silver)":"var(--bronze)"}}>{prize(p.rank-1)}</div>}
               </div>
               <div className={`rpts ${ptc}`}>{p.pts}</div>
               <div style={{fontSize:12,color:"var(--t3)"}}>›</div>
@@ -598,20 +774,20 @@ function RankingScreen({ data, session, setView, scores, openProfile }) {
           );
         })}
       </div>
-      <button className="btn bg bsm" onClick={()=>setView(session.isAdmin?"admin":"events")}>← Zurück</button>
+      <button className="btn bg bsm" onClick={()=>session.isAdmin?setView("admin"):goHome()}>← Zurück</button>
     </div>
   );
 }
 
 // ─── PROFILE ──────────────────────────────────────────────────────────────────
-function ProfileScreen({ data, session, setView, scores, profilePid }) {
+function ProfileScreen({ data, session, setView, scores, profilePid, goHome }) {
   const player = data.players.find(p=>p.id===profilePid);
   if(!player) return <div className="wrap pe"><div className="empty"><div className="ei">👤</div><h3>Spieler nicht gefunden</h3></div></div>;
 
   const rank = buildRank(data.players, scores);
   const myRankIdx = rank.findIndex(p=>p.id===profilePid);
   const myPts = totalPts(profilePid, scores);
-  const pot = Number(data.events[0]?.potCHF)||0;
+  const pot = data.events[0] ? calcPot(data.events[0].id, data.players, data.paid, data.events[0].entryFee||10) : 0;
   const isMe = session.pid === profilePid;
 
   const prize = i => {
@@ -719,33 +895,42 @@ function ProfileScreen({ data, session, setView, scores, profilePid }) {
       })}
 
       <button className="btn bg bsm" onClick={()=>setView("ranking")}>← Zurück zur Rangliste</button>
+      <button className="btn bg bsm" style={{marginLeft:8}} onClick={()=>goHome()}>🏠 Home</button>
     </div>
   );
 }
 
 // ─── ADMIN ────────────────────────────────────────────────────────────────────
-function AdminScreen({ data, persist, toast$, setView, scores, openProfile, cfg, persistCfg }) {
-  const [tab, setTab] = useState("solutions");
-  const [evForm, setEvForm] = useState({ title:"", deadline:"", potCHF:"" });
+function AdminScreen({ data, persist, toast$, setView, scores, openProfile, cfg, persistCfg, adminViewRef }) {
+  const [adminView, setAdminView] = useState("home"); // home | event | settings
+  useEffect(()=>{ if(adminViewRef) adminViewRef.current = setAdminView; },[]); // expose to nav
+  const [activeEvId, setActiveEvId] = useState(null);
+  const [activeEvTab, setActiveEvTab] = useState("solutions"); // solutions | questions
+  const [collapsed, setCollapsed] = useState({});
+  const [evForm, setEvForm] = useState({ title:"", deadline:"", entryFee:"10" });
   const [qForm, setQForm] = useState({ eventId:data.events[0]?.id||"", text:"", type:"choice", points:10, options:["","","",""], tolerance:0 });
-  const [selEv, setSelEv] = useState(data.events[0]?.id||"");
   const [drafts, setDrafts] = useState({});
   const [mailCfg, setMailCfg] = useState({ serviceId:cfg.serviceId||"", templateId:cfg.templateId||"", publicKey:cfg.publicKey||"" });
   const [mailSending, setMailSending] = useState(false);
+  const [globalTab, setGlobalTab] = useState("events"); // for settings: events|players|mail|ranking
 
   const solved=countSolved(data.events), total=countTotal(data.events);
-  const allSolved = total>0 && solved===total;
 
   const createEvent = async () => {
     if(!evForm.title.trim()||!evForm.deadline) return toast$("Titel und Deadline erforderlich","err");
-    const ev={id:uid(),title:evForm.title.trim(),deadline:evForm.deadline,potCHF:evForm.potCHF||0,questions:[]};
+    const ev={id:uid(),title:evForm.title.trim(),deadline:evForm.deadline,entryFee:Number(evForm.entryFee)||10,questions:[]};
     const next={...data,events:[...data.events,ev]};
-    await persist(next); setEvForm({title:"",deadline:"",potCHF:""}); setSelEv(ev.id);
-    setQForm(f=>({...f,eventId:ev.id})); toast$("Event erstellt ✓");
+    await persist(next); setEvForm({title:"",deadline:"",entryFee:"10"}); toast$("Event erstellt ✓");
+    openAdminEvent(ev.id, "questions");
   };
 
-  const addQ = async () => {
-    const {eventId,text,type,points,options,tolerance}=qForm;
+  const deleteEvent = async (evId) => {
+    if(!confirm("Event wirklich löschen?")) return;
+    await persist({...data,events:data.events.filter(e=>e.id!==evId)}); toast$("Event gelöscht");
+  };
+
+  const addQ = async (eventId) => {
+    const {text,type,points,options,tolerance}=qForm;
     if(!text.trim()||!eventId) return toast$("Frage und Event erforderlich","err");
     if(type==="choice"&&options.filter(o=>o.trim()).length<2) return toast$("Min. 2 Optionen angeben","err");
     const q={id:uid(),text:text.trim(),type,points:Number(points),options:type==="choice"?options.filter(o=>o.trim()):[],tolerance:type==="number"?Number(tolerance):0,solution:null};
@@ -759,39 +944,32 @@ function AdminScreen({ data, persist, toast$, setView, scores, openProfile, cfg,
   };
 
   const setSol = async (evId,qId,sol) => {
-    const next={...data,events:data.events.map(e=>e.id===evId?{...e,questions:e.questions.map(q=>q.id===qId?{...q,solution:sol||null}:q)}:e)};
+    const next={...data,events:data.events.map(e=>e.id===evId?{...e,questions:e.questions.map(q=>q.id===qId?{...q,solution:sol}:q)}:e)};
     await persist(next);
-    setDrafts(d=>{ const n={...d}; delete n[qId]; return n; });
-    if(sol){
-      toast$("Lösung gespeichert – Rangliste aktualisiert!");
-      // Check if now all questions are solved -> prompt mail
-      const nowSolved = countSolved(next.events);
-      const nowTotal = countTotal(next.events);
-      if(nowTotal>0 && nowSolved===nowTotal && cfg.serviceId && cfg.templateId && cfg.publicKey){
-        toast$("Alle Fragen bewertet! Mails werden versendet...");
-        autoSendMails(next, cfg);
-      }
-    } else toast$("Lösung entfernt");
+    // Check if all solved → auto-send mails
+    const newScores=computeScores(next.events,next.answers,next.players);
+    const newSolved=countSolved(next.events), newTotal=countTotal(next.events);
+    if(newTotal>0&&newSolved===newTotal&&cfg.serviceId&&cfg.templateId&&cfg.publicKey) {
+      await autoSendMails(next, cfg);
+    }
+    toast$("Lösung gespeichert ✓");
   };
 
   const autoSendMails = async (currentData, currentCfg) => {
-    const currentScores = computeScores(currentData.events, currentData.answers, currentData.players);
-    const rank = buildRank(currentData.players, currentScores);
-    const pot = Number(currentData.events[0]?.potCHF)||0;
-    const eventTitle = currentData.events[0]?.title||"CoTipp";
-    const newSent = {...(currentCfg.mailsSent||{})};
-    const playersWithMail = currentData.players.filter(p=>p.email&&!newSent[p.id]);
-    let ok=0, fail=0;
-    for(const p of playersWithMail){
-      try{
-        await sendRankingMail(currentCfg, p, rank, pot, eventTitle);
-        newSent[p.id]=true; ok++;
-      } catch(e){ fail++; }
+    const currentScores=computeScores(currentData.events,currentData.answers,currentData.players);
+    const rank=buildRank(currentData.players,currentScores);
+    const pot=currentData.events[0] ? calcPot(currentData.events[0].id, currentData.players, currentData.paid, currentData.events[0].entryFee||10) : 0;
+    const eventTitle=currentData.events.map(e=>e.title).join(", ");
+    const newSent={...(currentCfg.mailsSent||{})};
+    const playersWithMail=currentData.players.filter(p=>p.email&&!newSent[p.id]);
+    for(const p of playersWithMail) {
+      try { await sendRankingMail(currentCfg,p,rank,pot,eventTitle); newSent[p.id]=true; } catch{}
     }
-    const updCfg = {...currentCfg, mailsSent:newSent};
-    await persistCfg(updCfg);
-    if(ok>0) toast$(`Mail an ${ok} Spieler versendet!`);
-    if(fail>0) toast$(`${fail} Mails fehlgeschlagen. EmailJS-Config prüfen.`,"err");
+    if(playersWithMail.length>0) {
+      const newCfg={...currentCfg,mailsSent:newSent};
+      await persistCfg(newCfg);
+      toast$(`${playersWithMail.length} Mails versendet ✓`);
+    }
   };
 
   const sendMailsManually = async () => {
@@ -801,129 +979,275 @@ function AdminScreen({ data, persist, toast$, setView, scores, openProfile, cfg,
     setMailSending(false);
   };
 
-  // Admin ranking tab
   const rank = buildRank(data.players, scores);
-  const pot = Number(data.events[0]?.potCHF)||0;
+  const pot = data.events[0] ? calcPot(data.events[0].id, data.players, data.paid, data.events[0].entryFee||10) : 0;
   const prize = i => { if(!pot) return null; if(i===0) return `CHF ${(pot*.6).toFixed(2)}`; if(i===1) return `CHF ${(pot*.3).toFixed(2)}`; if(i===2) return `CHF ${(pot*.1).toFixed(2)}`; return null; };
 
-  const TABS = [
-    {id:"solutions",l:"✅ Lösungen"},
-    {id:"ranking",l:"🏅 Rangliste"},
-    {id:"events",l:"📅 Events"},
-    {id:"questions",l:"❓ Fragen"},
-    {id:"players",l:"👥 Spieler"},
-    {id:"mail",l:"📧 Mail"},
-  ];
+  const openAdminEvent = (evId, tab="solutions") => {
+    setActiveEvId(evId);
+    setActiveEvTab(tab);
+    setAdminView("event");
+    setQForm(f=>({...f, eventId:evId}));
+  };
 
-  return (
+  const toggleCollapse = (evId) => setCollapsed(c=>({...c,[evId]:!c[evId]}));
+
+  // ── HOME VIEW ──────────────────────────────────────────────────────────────
+  if(adminView==="home") return (
     <div className="wrap pe">
       <div style={{marginBottom:16}}>
-        <div style={{fontSize:22,fontWeight:800,letterSpacing:"-.4px"}}>⚙ Admin-Panel</div>
+        <div style={{fontSize:22,fontWeight:800,letterSpacing:"-.4px"}}>⚙ Admin – Übersicht</div>
         <div className="tm mt4">{solved}/{total} Fragen bewertet · {data.players.length} Spieler</div>
         {total>0&&<div className="prog mt8"><div className="progf" style={{width:`${(solved/total)*100}%`}}/></div>}
       </div>
 
+      {/* Event cards */}
+      <div style={{fontSize:15,fontWeight:800,marginBottom:10,color:"var(--t2)"}}>📋 Laufende & kommende Events</div>
+      {!data.events.length && (
+        <div className="empty"><div className="ei">📅</div><h3>Noch keine Events</h3><p>Erstelle unten ein neues Event.</p></div>
+      )}
+      {data.events.map(ev=>{
+        const qs=ev.questions||[];
+        const evSolved=qs.filter(hasSol).length;
+        const closed=!isOpen(ev.deadline);
+        const isCollapsed=collapsed[ev.id];
+        return (
+          <div key={ev.id} className="ev-card">
+            <div className="ev-card-top" style={{cursor:"pointer"}} onClick={()=>openAdminEvent(ev.id,"questions")}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div>
+                  <div className="ev-card-title">{ev.title}</div>
+                  <div className="ev-card-meta">
+                    Pot: CHF {calcPot(ev.id,data.players,data.paid,ev.entryFee||10)} (CHF {ev.entryFee||10}/Spieler) · {qs.length} Fragen · {evSolved}/{qs.length} bewertet
+                  </div>
+                </div>
+                <span style={{fontSize:14,color:"var(--blue)",fontWeight:600}}>Öffnen →</span>
+              </div>
+              {qs.length>0&&(
+                <div className="prog mt8"><div className="progf" style={{width:`${(evSolved/qs.length)*100}%`}}/></div>
+              )}
+            </div>
+            <div className="ev-card-bot" style={{gap:8,flexWrap:"wrap"}}>
+              <span className={closed?"ev-status-closed":"ev-status-open"}>{closed?"⛔ Geschlossen":"● Offen"}</span>
+              {!closed&&<span style={{fontSize:12,color:"var(--t3)"}}>⏱ <Countdown deadline={ev.deadline}/></span>}
+              <button className="btn bg bsm" style={{marginLeft:"auto",color:"var(--red)"}} onClick={e=>{e.stopPropagation();deleteEvent(ev.id);}}>🗑 Löschen</button>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* New event toggle */}
+      <div className="tabs" style={{marginTop:20}}>
+        <button className={`tab ${globalTab==="events"?"active":""}`} onClick={()=>setGlobalTab(g=>g==="events"?"none":"events")}>➕ Neues Event erstellen</button>
+      </div>
+
+      {/* New event form */}
+      {globalTab==="events"&&(
+        <div className="card">
+          <div className="ctitle">Neues Event erstellen</div>
+          <div className="field"><label>Event-Titel</label>
+            <input className="inp" placeholder="z.B. EM Finale 2026" value={evForm.title} onChange={e=>setEvForm(f=>({...f,title:e.target.value}))}/>
+          </div>
+          <div className="field"><label>Tipp-Deadline</label>
+            <input className="inp" type="datetime-local" value={evForm.deadline} onChange={e=>setEvForm(f=>({...f,deadline:e.target.value}))}/>
+          </div>
+          <div className="field"><label>Einsatz pro Spieler (CHF)</label>
+            <input className="inp" type="number" placeholder="10" value={evForm.entryFee} onChange={e=>setEvForm(f=>({...f,entryFee:e.target.value}))}/>
+            <div style={{fontSize:11,color:"var(--t3)",marginTop:5}}>Der Pot wächst automatisch mit jedem bezahlten Spieler.</div>
+          </div>
+          <button className="btn bp bfull mt8" onClick={createEvent}>+ Event erstellen</button>
+        </div>
+      )}
+
+
+
+    </div>
+  );
+
+  // ── SETTINGS VIEW ──────────────────────────────────────────────────────────
+  if(adminView==="settings") return (
+    <div className="wrap pe">
+      <button className="ev-back" onClick={()=>setAdminView("home")}>← Zurück</button>
+      <div style={{fontSize:20,fontWeight:800,letterSpacing:"-.3px",marginBottom:20}}>⚙️ Einstellungen</div>
+      <div className="card">
+        <div className="ctitle">📧 EmailJS Konfiguration</div>
+        <div className="ibox" style={{marginBottom:16}}>
+          <strong>Einmalig einrichten:</strong> Gehe auf <a href="https://emailjs.com" target="_blank" rel="noreferrer" style={{color:"var(--blue)"}}>emailjs.com</a>, erstelle ein kostenloses Konto (200 Mails/Monat), verbinde deinen Mail-Service und erstelle ein Template mit den Variablen: <code>to_email</code>, <code>to_name</code>, <code>event_title</code>, <code>ranking_text</code>, <code>my_rank</code>, <code>my_pts</code>, <code>prize_text</code>. Danach trägst du die drei Keys unten ein.
+        </div>
+        {[{k:"serviceId",l:"Service ID"},{k:"templateId",l:"Template ID"},{k:"publicKey",l:"Public Key"}].map(({k,l})=>(
+          <div key={k} className="field"><label>{l}</label>
+            <input className="inp" placeholder={l} value={mailCfg[k]} onChange={e=>setMailCfg(f=>({...f,[k]:e.target.value}))}/>
+          </div>
+        ))}
+        <button className="btn bp bfull mt8" onClick={async()=>{ await persistCfg({...cfg,...mailCfg}); toast$("Konfiguration gespeichert ✓"); }}>Speichern</button>
+      </div>
+      <div className="card">
+        <div className="ctitle">Manueller Mail-Versand</div>
+        <div className="tm" style={{marginBottom:12}}>Sobald du die letzte Frage bewertest, werden Mails automatisch an alle Spieler mit E-Mail-Adresse versendet.</div>
+        <div style={{fontSize:13,marginBottom:12}}>
+          {data.players.filter(p=>p.email).length} von {data.players.length} Spielern haben eine E-Mail hinterlegt.
+        </div>
+        <button className="btn bp bfull" disabled={mailSending} onClick={sendMailsManually}>
+          {mailSending?"Sende Mails…":"📧 Mails jetzt senden"}
+        </button>
+        {data.players.filter(p=>p.email).map(p=>(
+          <div key={p.id} className="rrow" style={{marginTop:8}}>
+            <span style={{fontWeight:600,flex:1}}>{p.name}</span>
+            <span style={{color:"var(--t3)"}}>{p.email}</span>
+          </div>
+        ))}
+        {!data.players.filter(p=>p.email).length&&<div className="tm">Noch kein Spieler hat eine E-Mail hinterlegt.</div>}
+      </div>
+    </div>
+  );
+
+  // ── EVENT DETAIL VIEW ──────────────────────────────────────────────────────
+  const activeEv = data.events.find(e=>e.id===activeEvId);
+  if(!activeEv) return <div className="wrap pe"><div className="empty"><div className="ei">📅</div><h3>Event nicht gefunden</h3></div></div>;
+  const qs = activeEv.questions||[];
+  const evSolved = qs.filter(hasSol).length;
+  const closed = !isOpen(activeEv.deadline);
+
+  return (
+    <div className="wrap pe">
+      <button className="ev-back" onClick={()=>setAdminView("home")}>← Alle Events</button>
+      <div className="ev-header">
+        <div style={{fontSize:19,fontWeight:800,letterSpacing:"-.3px",marginBottom:4}}>{activeEv.title}</div>
+        <div className="tm">Pot: CHF {calcPot(activeEv.id,data.players,data.paid,activeEv.entryFee||10)} · {qs.length} Fragen · {evSolved}/{qs.length} bewertet</div>
+        {qs.length>0&&<div className="prog mt8"><div className="progf" style={{width:`${(evSolved/qs.length)*100}%`}}/></div>}
+      </div>
+
       <div className="tabs">
-        {TABS.map(t=><button key={t.id} className={`tab ${tab===t.id?"active":""}`} onClick={()=>setTab(t.id)}>{t.l}</button>)}
+        <button className={`tab ${activeEvTab==="questions"?"active":""}`} onClick={()=>setActiveEvTab("questions")}>❓ Fragen</button>
+        <button className={`tab ${activeEvTab==="solutions"?"active":""}`} onClick={()=>setActiveEvTab("solutions")}>✅ Lösungen</button>
+        <button className={`tab ${activeEvTab==="ranking"?"active":""}`} onClick={()=>setActiveEvTab("ranking")}>🏅 Rangliste</button>
+        <button className={`tab ${activeEvTab==="players"?"active":""}`} onClick={()=>setActiveEvTab("players")}>👥 Spieler</button>
       </div>
 
       {/* ── SOLUTIONS ── */}
-      {tab==="solutions"&&(
+      {activeEvTab==="solutions"&&(
         <>
           <div className="ibox" style={{marginBottom:16}}>
             💡 Trage die richtige Antwort pro Frage ein und klicke <strong>Speichern</strong>. Punkte werden <strong>sofort automatisch berechnet</strong> und die Rangliste aktualisiert.
           </div>
-          {!data.events.length&&<div className="empty"><div className="ei">📅</div><h3>Noch keine Events</h3></div>}
-          {data.events.map(ev=>{
-            const qs=ev.questions||[];
-            const evSolved=qs.filter(hasSol).length;
+          {!qs.length&&<div className="empty"><div className="ei">❓</div><h3>Noch keine Fragen</h3><p>Wechsle zum Tab „❓ Fragen" um Fragen hinzuzufügen.</p></div>}
+          {qs.map((q,qi)=>{
+            const isSolved=hasSol(q);
+            const draft=drafts[q.id]??(isSolved?q.solution:"");
             return (
-              <div key={ev.id} className="card">
-                <div className="fbtw" style={{marginBottom:16}}>
-                  <div>
-                    <div style={{fontWeight:700,fontSize:16}}>{ev.title}</div>
-                    <div className="tm mt4">{evSolved}/{qs.length} Fragen bewertet</div>
-                    {qs.length>0&&<div className="prog mt4" style={{width:160}}><div className="progf" style={{width:`${(evSolved/qs.length)*100}%`}}/></div>}
-                  </div>
-                  <button className="btn bo bsm" onClick={()=>setTab("ranking")}>🏅 Rangliste</button>
+              <div key={q.id} className={`qc ${isSolved?"solved":""}`}>
+                <div className="qh">
+                  <div className="qn">{qi+1}</div>
+                  <div className="qt">{q.text}</div>
+                  <div className="qp">{q.points} Pt.</div>
+                  {isSolved&&<span className="chip cgreen" style={{flexShrink:0}}>✓ Bewertet</span>}
                 </div>
-                {!qs.length&&<div className="tm">Keine Fragen vorhanden</div>}
-                {qs.map((q,qi)=>{
-                  const isSolved=hasSol(q);
-                  const draft=drafts[q.id]??(isSolved?q.solution:"");
-                  return (
-                    <div key={q.id} className={`qc ${isSolved?"solved":""}`}>
-                      <div className="qh">
-                        <div className="qn">{qi+1}</div>
-                        <div className="qt">{q.text}</div>
-                        <div className="qp">{q.points} Pt.</div>
-                        {isSolved&&<span className="chip cgreen" style={{flexShrink:0}}>✓ Bewertet</span>}
-                      </div>
-                      {data.players.length>0&&(
-                        <table className="atbl">
-                          <thead><tr><th>Spieler</th><th>Tipp</th>{isSolved&&<th>Punkte</th>}</tr></thead>
-                          <tbody>
-                            {data.players.map(p=>{
-                              const k=`${p.id}_${q.id}`;
-                              const ans=data.answers[k];
-                              const pts=isSolved?(scores[k]??0):null;
-                              return (
-                                <tr key={p.id}>
-                                  <td style={{fontWeight:600,cursor:"pointer",color:"var(--blue)"}} onClick={()=>openProfile(p.id)}>{p.name}</td>
-                                  <td>{ans!==undefined&&ans!==""&&ans!==null?<span className={isSolved?(pts>0?"cg2":"cr"):""}>{ans}</span>:<span className="cm">kein Tipp</span>}</td>
-                                  {isSolved&&<td style={{fontWeight:700,color:pts>0?"var(--green)":"var(--t3)"}}>{pts}</td>}
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      )}
-                      <div className="solwrap">
-                        <span className="sollbl">Lösung:</span>
-                        {q.type==="choice"
-                          ?<select className={`solinp ${draft?"isset":""}`} value={draft} onChange={e=>setDrafts(d=>({...d,[q.id]:e.target.value}))}>
-                              <option value="">– Richtige Antwort –</option>
-                              {q.options.map((o,oi)=><option key={oi} value={o}>{o}</option>)}
-                            </select>
-                          :<input className={`solinp ${draft?"isset":""}`} type={q.type==="number"?"number":"text"}
-                              placeholder={q.type==="number"?`Zahl (±${q.tolerance})`:"Korrekte Antwort…"}
-                              value={draft} onChange={e=>setDrafts(d=>({...d,[q.id]:e.target.value}))}/>
-                        }
-                        <button className="solbtn solsave" disabled={!draft} onClick={()=>setSol(ev.id,q.id,draft)}>
-                          {isSolved?"Aktualisieren":"Speichern"}
-                        </button>
-                        {isSolved&&<button className="solbtn soldel" onClick={()=>setSol(ev.id,q.id,null)}>✕</button>}
-                      </div>
-                    </div>
-                  );
-                })}
+                {/* Player answers summary */}
+                <div style={{display:"flex",flexWrap:"wrap",gap:6,margin:"8px 0"}}>
+                  {data.players.map(pl=>{
+                    const ans=data.answers[`${pl.id}_${q.id}`];
+                    if(!ans) return null;
+                    const correct=isSolved&&textMatch(ans,q.solution);
+                    return <span key={pl.id} className={`chip ${isSolved?(correct?"cgreen":"cred"):""}`} style={{fontSize:11}}>{pl.name}: {ans}</span>;
+                  })}
+                </div>
+                {q.type==="choice"&&(
+                  <div className="cg">
+                    {q.options.map((opt,oi)=>(
+                      <button key={oi} className={`cb ${draft===opt?"sel":""} ${isSolved&&opt===q.solution?"cor":""}`}
+                        onClick={()=>setDrafts(d=>({...d,[q.id]:opt}))}>
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {(q.type==="text"||q.type==="number")&&(
+                  <input className="inp" type={q.type==="number"?"number":"text"}
+                    placeholder="Richtige Antwort eingeben…"
+                    value={draft} onChange={e=>setDrafts(d=>({...d,[q.id]:e.target.value}))}/>
+                )}
+                <div className="flex mt8" style={{gap:8}}>
+                  <button className="btn bp bsm" onClick={()=>setSol(activeEvId,q.id,drafts[q.id]??q.solution??"")}>{isSolved?"Aktualisieren":"✓ Speichern"}</button>
+                  {isSolved&&<span style={{fontSize:12,color:"var(--t3)",alignSelf:"center"}}>Lösung: <strong>{q.solution}</strong>{q.type==="number"&&` (±${q.tolerance})`}</span>}
+                </div>
               </div>
             );
           })}
         </>
       )}
 
-      {/* ── ADMIN RANKING TAB ── */}
-      {tab==="ranking"&&(
+      {/* ── QUESTIONS ── */}
+      {activeEvTab==="questions"&&(
         <>
-          <div className="ibox" style={{marginBottom:16}}>
-            Klick auf einen Spieler um sein detailliertes Profil zu sehen.
-          </div>
           <div className="card">
-            <div className="ctitle">Zwischenrangliste — {rank.length} Spieler · {solved}/{total} bewertet</div>
-            {total>0&&<div className="prog" style={{marginBottom:16}}><div className="progf" style={{width:`${(solved/total)*100}%`}}/></div>}
-            {rank.length===0&&<div className="empty"><div className="ei">🏅</div><h3>Noch keine Punkte</h3></div>}
-            {rank.map((p,i)=>{
-              const pc=i===0?"rp1":i===1?"rp2":i===2?"rp3":"rpn";
-              const ptc=i===0?"rp1c":i===1?"rp2c":i===2?"rp3c":"rpnc";
+            <div className="ctitle">Neue Frage hinzufügen</div>
+            <div className="field"><label>Fragetext</label>
+              <input className="inp" placeholder="Wer gewinnt das Finale?" value={qForm.text} onChange={e=>setQForm(f=>({...f,text:e.target.value}))}/>
+            </div>
+            <div className="field"><label>Fragetyp</label>
+              <select className="inp" value={qForm.type} onChange={e=>setQForm(f=>({...f,type:e.target.value}))}>
+                <option value="choice">Auswahl (Multiple Choice)</option>
+                <option value="text">Freitext</option>
+                <option value="number">Zahl mit Toleranz</option>
+              </select>
+            </div>
+            {qForm.type==="choice"&&(
+              <div className="field"><label>Antwortoptionen</label>
+                {qForm.options.map((o,oi)=>(
+                  <input key={oi} className="inp" style={{marginBottom:6}} placeholder={`Option ${oi+1}`}
+                    value={o} onChange={e=>setQForm(f=>({...f,options:f.options.map((x,xi)=>xi===oi?e.target.value:x)}))}/>
+                ))}
+              </div>
+            )}
+            {qForm.type==="number"&&(
+              <div className="field"><label>Toleranz (±)</label>
+                <input className="inp" type="number" placeholder="1" value={qForm.tolerance} onChange={e=>setQForm(f=>({...f,tolerance:e.target.value}))}/>
+              </div>
+            )}
+            <div className="field"><label>Punkte</label>
+              <input className="inp" type="number" value={qForm.points} onChange={e=>setQForm(f=>({...f,points:e.target.value}))}/>
+            </div>
+            <button className="btn bp bfull mt8" onClick={()=>addQ(activeEvId)}>+ Frage hinzufügen</button>
+          </div>
+
+          {!qs.length&&<div className="empty"><div className="ei">❓</div><h3>Noch keine Fragen</h3></div>}
+          {qs.map((q,qi)=>(
+            <div key={q.id} className="qc">
+              <div className="qh">
+                <div className="qn">{qi+1}</div>
+                <div className="qt">{q.text}</div>
+                <div className="qp">{q.points} Pt.</div>
+                {hasSol(q)&&<span className="chip cgreen" style={{flexShrink:0,fontSize:10}}>✓</span>}
+              </div>
+              {q.type==="choice"&&<div style={{fontSize:12,color:"var(--t3)",marginTop:6}}>Optionen: {q.options.join(" · ")}</div>}
+              {q.type==="number"&&<div style={{fontSize:12,color:"var(--t3)",marginTop:6}}>Typ: Zahl ±{q.tolerance}</div>}
+              <button className="btn bg bsm mt8" style={{color:"var(--red)"}} onClick={()=>deleteQ(activeEvId,q.id)}>🗑 Löschen</button>
+            </div>
+          ))}
+        </>
+      )}
+
+      {/* ── RANKING (per event) ── */}
+      {activeEvTab==="ranking"&&(()=>{
+        const evRank = buildRank(data.players, scores);
+        const evPot = calcPot(activeEv.id, data.players, data.paid, activeEv.entryFee||10);
+        const evPrize = i => { if(!evPot) return null; if(i===0) return `CHF ${(evPot*.6).toFixed(2)}`; if(i===1) return `CHF ${(evPot*.3).toFixed(2)}`; if(i===2) return `CHF ${(evPot*.1).toFixed(2)}`; return null; };
+        return (
+          <div className="card">
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+              <div className="ctitle" style={{marginBottom:0}}>Rangliste – {activeEv.title}</div>
+              {evPot>0&&<div style={{fontSize:13,fontWeight:700,color:"var(--green)"}}>Pot: CHF {evPot}</div>}
+            </div>
+            {evRank.length===0&&<div className="empty"><div className="ei">🏅</div><h3>Noch keine Punkte</h3></div>}
+            {evRank.map((p,i)=>{
+              const pc=p.rank===1?"rp1":p.rank===2?"rp2":p.rank===3?"rp3":"rpn";
+              const ptc=p.rank===1?"rp1c":p.rank===2?"rp2c":p.rank===3?"rp3c":"rpnc";
               return (
-                <div key={p.id} className="rrow clickable" style={{animation:"fadeUp .3s ease both",animationDelay:`${i*40}ms`}}
-                  onClick={()=>openProfile(p.id)}>
-                  <div className={`rpos ${pc}`}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":i+1}</div>
+                <div key={p.id} className="rrow clickable" onClick={()=>openProfile(p.id)}>
+                  <div className={`rpos ${pc}`}>{p.rank===1?"🥇":p.rank===2?"🥈":p.rank===3?"🥉":p.rank}</div>
                   <div style={{flex:1}}>
                     <div className="rname">{p.name}</div>
-                    {prize(i)&&<div style={{fontSize:12,fontWeight:600,marginTop:2,color:i===0?"var(--gold)":i===1?"var(--silver)":"var(--bronze)"}}>{prize(i)}</div>}
-                    <div style={{fontSize:11,color:"var(--t3)",marginTop:1}}>{p.email}</div>
+                    {evPrize(p.rank-1)&&<div style={{fontSize:12,fontWeight:600,marginTop:2,color:p.rank===1?"var(--gold)":p.rank===2?"var(--silver)":"var(--bronze)"}}>{evPrize(p.rank-1)}</div>}
                   </div>
                   <div className={`rpts ${ptc}`}>{p.pts}</div>
                   <div style={{fontSize:12,color:"var(--t3)"}}>›</div>
@@ -931,188 +1255,67 @@ function AdminScreen({ data, persist, toast$, setView, scores, openProfile, cfg,
               );
             })}
           </div>
-        </>
-      )}
+        );
+      })()}
 
-      {/* ── EVENTS ── */}
-      {tab==="events"&&(
-        <>
+      {/* ── PLAYERS (per event) ── */}
+      {activeEvTab==="players"&&(()=>{
+        const evPaidCount = data.players.filter(p=>(data.paid||{})[`${activeEv.id}_${p.id}`]).length;
+        const evPot = calcPot(activeEv.id, data.players, data.paid, activeEv.entryFee||10);
+        return (
           <div className="card">
-            <div className="ctitle">Neues Event erstellen</div>
-            <div className="field"><label>Titel</label><input className="inp" placeholder="EM Finale 2026" value={evForm.title} onChange={e=>setEvForm(f=>({...f,title:e.target.value}))}/></div>
-            <div className="g2">
-              <div className="field"><label>Tipp-Deadline</label><input className="inp" type="datetime-local" value={evForm.deadline} onChange={e=>setEvForm(f=>({...f,deadline:e.target.value}))}/></div>
-              <div className="field"><label>Pot (CHF)</label><input className="inp" type="number" min={0} placeholder="200" value={evForm.potCHF} onChange={e=>setEvForm(f=>({...f,potCHF:e.target.value}))}/></div>
-            </div>
-            <button className="btn bp" onClick={createEvent}>+ Event erstellen</button>
-          </div>
-          {!data.events.length&&<div className="empty"><div className="ei">📅</div><h3>Noch keine Events</h3></div>}
-          {data.events.map(ev=>(
-            <div key={ev.id} className="card csm">
-              <div className="fbtw">
-                <div>
-                  <div style={{fontWeight:700,fontSize:15}}>{ev.title}</div>
-                  <div className="tm mt4">Deadline: {fmtDate(ev.deadline)} · CHF {ev.potCHF} · {ev.questions?.length||0} Fragen</div>
-                  <span className={`chip mt4 ${isOpen(ev.deadline)?"cgreen":"cred"}`} style={{display:"inline-flex",marginTop:8}}>
-                    {isOpen(ev.deadline)?"● Offen":"● Geschlossen"}
-                  </span>
-                </div>
-                <button className="btn bd bsm" onClick={async()=>{ await persist({...data,events:data.events.filter(e=>e.id!==ev.id)}); toast$("Event gelöscht"); }}>Löschen</button>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+              <div>
+                <div className="ctitle" style={{marginBottom:2}}>Spieler – {activeEv.title}</div>
+                <div className="tm">Einsatz CHF {activeEv.entryFee||10}/Spieler · {evPaidCount}/{data.players.length} bezahlt</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:22,fontWeight:800,color:evPaidCount===data.players.length&&data.players.length>0?"var(--green)":"var(--orange)"}}>{evPaidCount}/{data.players.length}</div>
+                <div style={{fontSize:10,color:"var(--t3)"}}>bezahlt</div>
               </div>
             </div>
-          ))}
-        </>
-      )}
-
-      {/* ── QUESTIONS ── */}
-      {tab==="questions"&&(
-        <>
-          <div className="card">
-            <div className="ctitle">Neue Frage hinzufügen</div>
-            <div className="field"><label>Event</label>
-              <select className="inp" value={qForm.eventId} onChange={e=>setQForm(f=>({...f,eventId:e.target.value}))}>
-                <option value="">– Event wählen –</option>
-                {data.events.map(ev=><option key={ev.id} value={ev.id}>{ev.title}</option>)}
-              </select>
-            </div>
-            <div className="field"><label>Fragetext</label><input className="inp" placeholder="Wer gewinnt das Finale?" value={qForm.text} onChange={e=>setQForm(f=>({...f,text:e.target.value}))}/></div>
-            <div className="g2">
-              <div className="field"><label>Typ</label>
-                <select className="inp" value={qForm.type} onChange={e=>setQForm(f=>({...f,type:e.target.value}))}>
-                  <option value="choice">Auswahl (Multiple Choice)</option>
-                  <option value="text">Freitext (offene Antwort)</option>
-                  <option value="number">Zahl mit Toleranz</option>
-                </select>
-              </div>
-              <div className="field"><label>Max. Punkte</label><input className="inp" type="number" min={1} value={qForm.points} onChange={e=>setQForm(f=>({...f,points:e.target.value}))}/></div>
-            </div>
-            {qForm.type==="choice"&&(
-              <div className="field"><label>Antwort-Optionen</label>
-                {qForm.options.map((opt,i)=>(
-                  <input key={i} className="inp" style={{marginBottom:7}} placeholder={`Option ${i+1}`} value={opt}
-                    onChange={e=>{ const o=[...qForm.options]; o[i]=e.target.value; setQForm(f=>({...f,options:o})); }}/>
-                ))}
-                <button className="btn bg bsm mt4" onClick={()=>setQForm(f=>({...f,options:[...f.options,""]}))}>+ Option</button>
+            {data.players.length>0&&(
+              <div className="prog" style={{marginBottom:14}}>
+                <div className="progf" style={{width:`${(evPaidCount/data.players.length)*100}%`,background:"var(--green)"}}/>
               </div>
             )}
-            {qForm.type==="number"&&(
-              <div className="field"><label>Toleranz (±)</label>
-                <input className="inp" type="number" min={0} value={qForm.tolerance} onChange={e=>setQForm(f=>({...f,tolerance:e.target.value}))}/>
-                <div className="tm mt4">Antworten innerhalb ±{qForm.tolerance} zählen als richtig</div>
-              </div>
-            )}
-            <button className="btn bp mt8" onClick={addQ}>+ Frage hinzufügen</button>
-          </div>
-          <div className="field"><label>Fragen für Event:</label>
-            <select className="inp" value={selEv} onChange={e=>setSelEv(e.target.value)}>
-              {data.events.map(ev=><option key={ev.id} value={ev.id}>{ev.title}</option>)}
-            </select>
-          </div>
-          {data.events.filter(e=>e.id===selEv).map(ev=>(
-            <div key={ev.id} className="card">
-              <div className="ctitle">{ev.title} — {ev.questions?.length||0} Fragen</div>
-              {!ev.questions?.length&&<div className="tm">Noch keine Fragen</div>}
-              {ev.questions?.map((q,i)=>(
-                <div key={q.id} className="qc">
-                  <div className="fbtw">
-                    <div style={{flex:1,paddingRight:12}}>
-                      <div style={{fontWeight:600,fontSize:14}}>{i+1}. {q.text}</div>
-                      <div className="tm mt4">{q.type==="choice"?q.options.join(" / "):q.type==="number"?`Zahl ±${q.tolerance}`:"Freitext"} · {q.points} Pt.</div>
-                      {hasSol(q)&&<span className="chip cgreen" style={{marginTop:6}}>✓ Lösung: {q.solution}</span>}
-                    </div>
-                    <button className="btn bd bsm" onClick={()=>deleteQ(ev.id,q.id)}>✕</button>
+            {data.players.length===0&&<div className="tm">Noch keine Spieler registriert.</div>}
+            {buildRank(data.players,scores).map((p)=>{
+              const key=`${activeEv.id}_${p.id}`;
+              const isPaid=!!(data.paid||{})[key];
+              return (
+                <div key={p.id} className="rrow" style={{alignItems:"center"}}>
+                  <div style={{flex:1,cursor:"pointer"}} onClick={()=>openProfile(p.id)}>
+                    <div className="rname" style={{fontSize:14}}>{p.name}</div>
+                    <div style={{fontSize:11,color:"var(--t3)"}}>{p.pts} Pt. · {p.email||"keine Mail"}</div>
                   </div>
+                  <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",userSelect:"none",flexShrink:0}}>
+                    <span style={{fontSize:12,fontWeight:600,color:isPaid?"var(--green)":"var(--t3)"}}>
+                      {isPaid?"✓ Bezahlt":"Ausstehend"}
+                    </span>
+                    <div
+                      onClick={async()=>{
+                        const newPaid={...(data.paid||{}),[key]:!isPaid};
+                        await persist({...data,paid:newPaid});
+                        toast$(isPaid?`${p.name} als ausstehend markiert`:`${p.name} als bezahlt markiert ✓`);
+                      }}
+                      style={{width:44,height:24,borderRadius:12,cursor:"pointer",flexShrink:0,background:isPaid?"var(--green)":"var(--b2)",transition:"background .2s",position:"relative"}}
+                    >
+                      <div style={{position:"absolute",top:3,left:isPaid?22:3,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left .2s",boxShadow:"0 1px 4px rgba(0,0,0,.2)"}}/>
+                    </div>
+                  </label>
                 </div>
-              ))}
-            </div>
-          ))}
-        </>
-      )}
-
-      {/* ── PLAYERS ── */}
-      {tab==="players"&&(
-        <div className="card">
-          <div className="ctitle">Alle Spieler — {data.players.length} Personen</div>
-          {!data.players.length&&<div className="empty"><div className="ei">👥</div><h3>Noch keine Spieler</h3><p>Spieler registrieren sich selbst beim Login.</p></div>}
-          {buildRank(data.players,scores).map((p,i)=>{
-            const pc=i===0?"rp1":i===1?"rp2":i===2?"rp3":"rpn";
-            const ptc=i===0?"rp1c":i===1?"rp2c":i===2?"rp3c":"rpnc";
-            return (
-              <div key={p.id} className="rrow clickable" onClick={()=>openProfile(p.id)}>
-                <div className={`rpos ${pc}`}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":i+1}</div>
-                <div style={{flex:1}}>
-                  <div className="rname">{p.name}</div>
-                  <div style={{fontSize:12,color:"var(--t3)"}}>{p.email||<span style={{fontStyle:"italic",opacity:.6}}>keine Mail</span>}</div>
-                </div>
-                <div className={`rpts ${ptc}`}>{p.pts}</div>
-                <div style={{fontSize:12,color:"var(--t3)"}}>›</div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ── MAIL ── */}
-      {tab==="mail"&&(
-        <>
-          <div className="card">
-            <div className="ctitle">📧 EmailJS Konfiguration</div>
-            <div className="ibox" style={{marginBottom:16}}>
-              <strong>Einmalig einrichten:</strong> Gehe auf <a href="https://emailjs.com" target="_blank" rel="noreferrer" style={{color:"var(--blue)"}}>emailjs.com</a>, erstelle ein kostenloses Konto (200 Mails/Monat), verbinde deinen Mail-Service und erstelle ein Template mit den Variablen: <code>to_email</code>, <code>to_name</code>, <code>event_title</code>, <code>ranking_text</code>, <code>my_rank</code>, <code>my_pts</code>, <code>prize_text</code>. Danach trägst du die drei Keys unten ein.
-            </div>
-            <div className="field"><label>Service ID</label>
-              <input className="inp" placeholder="service_xxxxxxx" value={mailCfg.serviceId} onChange={e=>setMailCfg(m=>({...m,serviceId:e.target.value}))}/>
-            </div>
-            <div className="field"><label>Template ID</label>
-              <input className="inp" placeholder="template_xxxxxxx" value={mailCfg.templateId} onChange={e=>setMailCfg(m=>({...m,templateId:e.target.value}))}/>
-            </div>
-            <div className="field"><label>Public Key</label>
-              <input className="inp" placeholder="XXXXXXXXXXXXXXX" value={mailCfg.publicKey} onChange={e=>setMailCfg(m=>({...m,publicKey:e.target.value}))}/>
-            </div>
-            <div className="flex mt8">
-              <button className="btn bp" onClick={async()=>{ await persistCfg({...cfg,...mailCfg}); toast$("Konfiguration gespeichert ✓"); }}>Speichern</button>
-              {cfg.serviceId&&cfg.templateId&&cfg.publicKey&&<span className="chip cgreen">✓ Konfiguriert</span>}
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="ctitle">Mail-Versand</div>
-            <div style={{marginBottom:14}}>
-              <div style={{fontWeight:600,fontSize:14,marginBottom:6}}>Automatischer Versand</div>
-              <div className="tm">Sobald du die letzte Frage bewertest, werden Mails automatisch an alle Spieler mit E-Mail-Adresse versendet.</div>
-            </div>
-            <div style={{marginBottom:14}}>
-              <div style={{fontWeight:600,fontSize:14,marginBottom:6}}>Manueller Versand</div>
-              <div className="tm" style={{marginBottom:10}}>Schlussrangliste jetzt manuell an alle Spieler senden (bereits versendete werden erneut gesendet).</div>
-              <div className="fbtw" style={{flexWrap:"wrap",gap:10}}>
-                <div className="tm">
-                  {data.players.filter(p=>p.email).length} von {data.players.length} Spielern haben eine E-Mail hinterlegt.
-                  {Object.keys(cfg.mailsSent||{}).length>0&&<span style={{marginLeft:8,color:"var(--green)",fontWeight:600}}>· {Object.keys(cfg.mailsSent).length} bereits versendet</span>}
-                </div>
-                <button className="btn bs bsm" disabled={mailSending||!cfg.serviceId} onClick={sendMailsManually}>
-                  {mailSending?"Wird gesendet…":"📧 Mails jetzt senden"}
-                </button>
-              </div>
-            </div>
-            {!cfg.serviceId&&(
-              <div style={{background:"var(--ol)",border:"1px solid #ffcc80",borderRadius:10,padding:"10px 14px",fontSize:12,color:"var(--orange)",marginTop:8}}>
-                ⚠ EmailJS noch nicht konfiguriert. Bitte zuerst die Keys oben eintragen.
+              );
+            })}
+            {evPaidCount>0&&(
+              <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid var(--b)",display:"flex",justifyContent:"space-between",fontSize:13}}>
+                <span style={{color:"var(--t3)"}}>Aktueller Pot:</span>
+                <span style={{fontWeight:700,color:"var(--green)"}}>CHF {evPot} ({evPaidCount} × CHF {activeEv.entryFee||10})</span>
               </div>
             )}
-            <div style={{marginTop:16}}>
-              <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Spieler mit Mail:</div>
-              {data.players.filter(p=>p.email).map(p=>(
-                <div key={p.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid var(--b)",fontSize:13}}>
-                  <span style={{flex:1,fontWeight:600}}>{p.name}</span>
-                  <span style={{color:"var(--t3)"}}>{p.email}</span>
-                  {cfg.mailsSent?.[p.id]&&<span className="chip cgreen" style={{fontSize:10}}>✓ gesendet</span>}
-                </div>
-              ))}
-              {!data.players.filter(p=>p.email).length&&<div className="tm">Noch kein Spieler hat eine E-Mail hinterlegt.</div>}
-            </div>
           </div>
-        </>
-      )}
+        );
+      })()}
     </div>
   );
 }
