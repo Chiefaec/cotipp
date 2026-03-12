@@ -342,16 +342,16 @@ select.inp{cursor:pointer}
 .toast.show{transform:translateX(-50%) translateY(0)}
 .toast.ok{border-color:#a8d8b8;color:var(--green)}
 .toast.err{border-color:#f0c0bc;color:var(--red)}
-.footer{text-align:center;padding:24px 16px 18px;font-size:10.5px;color:var(--t3);line-height:1.8}
+.footer-fixed{position:fixed;bottom:0;left:0;right:0;text-align:center;padding:4px 16px;font-size:10px;color:var(--t3);background:var(--bg);border-top:1px solid var(--b);z-index:90;white-space:nowrap}
 
 /* BOTTOM NAV */
-.bnav{position:fixed;bottom:0;left:0;right:0;z-index:200;background:rgba(255,255,255,.97);backdrop-filter:blur(20px);border-top:1px solid var(--b);display:flex;align-items:stretch;height:60px;box-shadow:0 -1px 0 var(--b)}
+.bnav{position:fixed;bottom:20px;left:0;right:0;z-index:200;background:rgba(255,255,255,.97);backdrop-filter:blur(20px);border-top:1px solid var(--b);display:flex;align-items:stretch;height:60px;box-shadow:0 -1px 0 var(--b)}
 .bnav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border:none;background:transparent;cursor:pointer;transition:all .15s;color:var(--t3);font-family:'Inter',sans-serif;padding:6px 0}
 .bnav-item.active{color:var(--blue)}
 .bnav-item span:first-child{font-size:20px;line-height:1}
 .bnav-item span:last-child{font-size:9.5px;font-weight:600;letter-spacing:.3px}
-.app-content{position:fixed;top:52px;left:0;right:0;bottom:60px;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:none}
-.admin-content{position:fixed;top:52px;left:0;right:0;bottom:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:none}
+.app-content{position:fixed;top:52px;left:0;right:0;bottom:98px;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:none}
+.admin-content{position:fixed;top:52px;left:0;right:0;bottom:20px;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:none}
 
 /* EVENT CARD (home) */
 .ev-card{background:var(--w);border:1px solid var(--b);border-radius:var(--r2);margin-bottom:14px;box-shadow:var(--sh);overflow:hidden;cursor:pointer;transition:box-shadow .15s,transform .1s}
@@ -475,7 +475,11 @@ export default function CoTipp() {
           </nav>
         )}
 
-        <div className="footer" style={{paddingBottom: session&&!session.isAdmin ? 80 : 24}}>© {new Date().getFullYear()} Colin Aeschbacher — Alle Rechte vorbehalten · CoTipp®</div>
+
+      </div>
+      {/* Fixed copyright footer – always at very bottom */}
+      <div className="footer-fixed" style={{bottom:0}}>
+        © {new Date().getFullYear()} Colin Aeschbacher — Alle Rechte vorbehalten · CoTipp®
       </div>
       <Toast {...toast} />
     </>
