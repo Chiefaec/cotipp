@@ -171,8 +171,9 @@ const CSS = `
   --sh2:0 4px 16px rgba(0,0,0,.10),0 1px 4px rgba(0,0,0,.06);
   --r:12px;--r2:18px;--r3:26px;
 }
-html,body{min-height:100vh;font-family:'Inter',sans-serif;color:var(--t);background:var(--bg);-webkit-font-smoothing:antialiased}
-.app{min-height:100vh}
+html,body{height:100%;max-height:100%;overflow:hidden;font-family:'Inter',sans-serif;color:var(--t);background:var(--bg);-webkit-font-smoothing:antialiased}
+#root{height:100%;overflow:hidden}
+.app{height:100%;overflow:hidden;display:flex;flex-direction:column}
 .wrap{max-width:760px;margin:0 auto;padding:28px 16px 64px}
 @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 @keyframes pop{0%{transform:scale(.7);opacity:0}70%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
@@ -349,7 +350,8 @@ select.inp{cursor:pointer}
 .bnav-item.active{color:var(--blue)}
 .bnav-item span:first-child{font-size:20px;line-height:1}
 .bnav-item span:last-child{font-size:9.5px;font-weight:600;letter-spacing:.3px}
-.app-content{position:fixed;top:52px;left:0;right:0;bottom:60px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.app-content{position:fixed;top:52px;left:0;right:0;bottom:60px;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:none}
+.admin-content{position:fixed;top:52px;left:0;right:0;bottom:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:none}
 
 /* EVENT CARD (home) */
 .ev-card{background:var(--w);border:1px solid var(--b);border-radius:var(--r2);margin-bottom:14px;box-shadow:var(--sh);overflow:hidden;cursor:pointer;transition:box-shadow .15s,transform .1s}
@@ -451,7 +453,7 @@ export default function CoTipp() {
           </nav>
         )}
 
-        <div className={session && !session.isAdmin ? "app-content" : ""} ref={session && !session.isAdmin ? scrollRef : null}>
+        <div className={session?.isAdmin ? "admin-content" : session ? "app-content" : ""} ref={scrollRef}>
           {view==="login"   && <LoginScreen   data={data} persist={persist} setSession={setSession} setView={setView} toast$={toast$} />}
           {view==="welcome" && <WelcomeScreen  data={data} session={session} setView={setView} />}
           {view==="home"    && !session?.isAdmin && <HomeScreen data={data} session={session} scores={scores} openEvent={openEvent} setView={setView} />}
