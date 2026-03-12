@@ -1,18 +1,45 @@
 import { useState, useEffect, useRef } from "react";
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-// ─── Storage ──────────────────────────────────────────────────────────────────
-const SK = "cotipp_v6";
-const SK_CFG = "cotipp_cfg";
+// ─── Firebase ─────────────────────────────────────────────────────────────────
+const FB_CFG = {
+  apiKey: "AIzaSyCoKOeLgZHfo9p5mRGWZT6bZerXCXRtikM",
+  authDomain: "cotipp-e74a4.firebaseapp.com",
+  projectId: "cotipp-e74a4",
+  storageBucket: "cotipp-e74a4.firebasestorage.app",
+  messagingSenderId: "432116524158",
+  appId: "1:432116524158:web:88080dfd4a6b70f413a42f"
+};
+const fbApp = initializeApp(FB_CFG);
+const db = getFirestore(fbApp);
+const DATA_REF = () => doc(db, "cotipp", "data");
+const CFG_REF  = () => doc(db, "cotipp", "config");
+
 const DEF = { players: [], events: [], answers: {}, paid: {} };
 const DEF_CFG = { serviceId:"", templateId:"", publicKey:"", mailsSent:{} };
+
 async function load() {
-  try { const r = await window.storage.get(SK, true); return r ? JSON.parse(r.value) : DEF; } catch { return DEF; }
+  try {
+    const snap = await getDoc(DATA_REF());
+    return snap.exists() ? { ...DEF, ...snap.data() } : DEF;
+  } catch(e) { console.error("load error", e); return DEF; }
 }
-async function save(d) { try { await window.storage.set(SK, JSON.stringify(d), true); } catch {} }
+async function save(d) {
+  try { await setDoc(DATA_REF(), d); } catch(e) { console.error("save error", e); }
+}
 async function loadCfg() {
-  try { const r = await window.storage.get(SK_CFG, true); return r ? {...DEF_CFG,...JSON.parse(r.value)} : DEF_CFG; } catch { return DEF_CFG; }
+  try {
+    const snap = await getDoc(CFG_REF());
+    return snap.exists() ? { ...DEF_CFG, ...snap.data() } : DEF_CFG;
+  } catch { return DEF_CFG; }
 }
-async function saveCfg(c) { try { await window.storage.set(SK_CFG, JSON.stringify(c), true); } catch {} }
+async function saveCfg(c) {
+  try { await setDoc(CFG_REF(), c); } catch(e) { console.error("saveCfg error", e); }
+}
+// Subscribe to real-time updates
+function subscribeData(cb) { return onSnapshot(DATA_REF(), snap => { if(snap.exists()) cb({ ...DEF, ...snap.data() }); }); }
+function subscribeCfg(cb)  { return onSnapshot(CFG_REF(),  snap => { if(snap.exists()) cb({ ...DEF_CFG, ...snap.data() }); }); }
 
 async function sendRankingMail(cfg, player, rank, pot, eventTitle) {
   const { serviceId, templateId, publicKey } = cfg;
@@ -380,7 +407,15 @@ export default function CoTipp() {
   const adminViewRef = useRef(null); // holds setAdminView from AdminScreen
   const scrollRef = useRef(null);
 
-  useEffect(()=>{ load().then(setData); loadCfg().then(setCfg); },[]);
+  useEffect(()=>{
+    // Subscribe to real-time Firestore updates – data persists forever
+    const unsubData = subscribeData(d => setData(d));
+    const unsubCfg  = subscribeCfg(c => setCfg(c));
+    // Also do initial load in case snapshot is slow
+    load().then(d => setData(d));
+    loadCfg().then(c => setCfg(c));
+    return () => { unsubData(); unsubCfg(); };
+  },[]);
   const persist = async next => { setData(next); await save(next); };
   const toast$ = (msg, type="ok") => {
     if(tRef.current) clearTimeout(tRef.current);
@@ -604,7 +639,8 @@ function HomeScreen({ data, session, scores, openEvent, setView }) {
       {!data.events.length && (
         <div className="empty"><div className="ei">📋</div><h3>Noch keine Events</h3><p>Der Admin hat noch kein Event erstellt.</p></div>
       )}
-      {data.events.map(ev=>{
+      {/* Open events first, closed events below – both always visible */}
+      {[...data.events.filter(ev=>isOpen(ev.deadline)), ...data.events.filter(ev=>!isOpen(ev.deadline))].map(ev=>{
         const closed=!isOpen(ev.deadline);
         const qs=ev.questions||[];
         const answered=qs.filter(q=>{ const v=data.answers[`${session.pid}_${q.id}`]; return v!==undefined&&v!==""; }).length;
@@ -612,7 +648,7 @@ function HomeScreen({ data, session, scores, openEvent, setView }) {
         const evPts=qs.reduce((s,q)=>{ const k=`${session.pid}_${q.id}`; return s+(hasSol(q)?(scores[k]??0):0); },0);
         const allAnswered=qs.length>0&&answered===qs.length;
         return (
-          <div key={ev.id} className="ev-card" onClick={()=>openEvent(ev.id)}>
+          <div key={ev.id} className="ev-card" onClick={()=>openEvent(ev.id)} style={{opacity:closed?0.6:1,filter:closed?"grayscale(15%)":"none"}}>
             <div className="ev-card-top">
               <div className="ev-card-title">{ev.title}</div>
               <div className="ev-card-meta">
@@ -1028,15 +1064,16 @@ function AdminScreen({ data, persist, toast$, setView, scores, openProfile, cfg,
       </div>
 
       {/* Event cards */}
-      <div style={{fontSize:15,fontWeight:800,marginBottom:10,color:"var(--t2)"}}>📋 Laufende & kommende Events</div>
       {!data.events.length && (
         <div className="empty"><div className="ei">📅</div><h3>Noch keine Events</h3><p>Erstelle unten ein neues Event.</p></div>
       )}
-      {data.events.map(ev=>{
+      {/* Open events */}
+      {data.events.filter(ev=>isOpen(ev.deadline)).length>0&&(
+        <div style={{fontSize:13,fontWeight:700,color:"var(--t2)",marginBottom:8,marginTop:4}}>📋 LAUFENDE & KOMMENDE EVENTS</div>
+      )}
+      {data.events.filter(ev=>isOpen(ev.deadline)).map(ev=>{
         const qs=ev.questions||[];
         const evSolved=qs.filter(hasSol).length;
-        const closed=!isOpen(ev.deadline);
-        const isCollapsed=collapsed[ev.id];
         return (
           <div key={ev.id} className="ev-card">
             <div className="ev-card-top" style={{cursor:"pointer"}} onClick={()=>openAdminEvent(ev.id,"questions")}>
@@ -1054,8 +1091,38 @@ function AdminScreen({ data, persist, toast$, setView, scores, openProfile, cfg,
               )}
             </div>
             <div className="ev-card-bot" style={{gap:8,flexWrap:"wrap"}}>
-              <span className={closed?"ev-status-closed":"ev-status-open"}>{closed?"⛔ Geschlossen":"● Offen"}</span>
-              {!closed&&<span style={{fontSize:12,color:"var(--t3)"}}>⏱ <Countdown deadline={ev.deadline}/></span>}
+              <span className="ev-status-open">● Offen</span>
+              <span style={{fontSize:12,color:"var(--t3)"}}>⏱ <Countdown deadline={ev.deadline}/></span>
+              <button className="btn bg bsm" style={{marginLeft:"auto",color:"var(--red)"}} onClick={e=>{e.stopPropagation();deleteEvent(ev.id);}}>🗑 Löschen</button>
+            </div>
+          </div>
+        );
+      })}
+      {/* Closed events – greyed out but always visible */}
+      {data.events.filter(ev=>!isOpen(ev.deadline)).length>0&&(
+        <div style={{fontSize:13,fontWeight:700,color:"var(--t3)",marginBottom:8,marginTop:16}}>🔒 ABGESCHLOSSENE EVENTS</div>
+      )}
+      {data.events.filter(ev=>!isOpen(ev.deadline)).map(ev=>{
+        const qs=ev.questions||[];
+        const evSolved=qs.filter(hasSol).length;
+        return (
+          <div key={ev.id} className="ev-card" style={{opacity:0.65,filter:"grayscale(20%)"}}>
+            <div className="ev-card-top" style={{cursor:"pointer"}} onClick={()=>openAdminEvent(ev.id,"questions")}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div>
+                  <div className="ev-card-title">{ev.title}</div>
+                  <div className="ev-card-meta">
+                    Pot: CHF {calcPot(ev.id,data.players,data.paid,ev.entryFee||10)} · {qs.length} Fragen · {evSolved}/{qs.length} bewertet
+                  </div>
+                </div>
+                <span style={{fontSize:14,color:"var(--t3)",fontWeight:600}}>Öffnen →</span>
+              </div>
+              {qs.length>0&&(
+                <div className="prog mt8"><div className="progf" style={{width:`${(evSolved/qs.length)*100}%`,background:"var(--t3)"}}/></div>
+              )}
+            </div>
+            <div className="ev-card-bot" style={{gap:8,flexWrap:"wrap"}}>
+              <span className="ev-status-closed">⛔ Abgeschlossen · {fmtDate(ev.deadline)}</span>
               <button className="btn bg bsm" style={{marginLeft:"auto",color:"var(--red)"}} onClick={e=>{e.stopPropagation();deleteEvent(ev.id);}}>🗑 Löschen</button>
             </div>
           </div>
