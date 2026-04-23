@@ -1328,28 +1328,48 @@ function AdminScreen({ data, persist, toast$, setView, scores, openProfile, cfg,
 
       {/* ── RANKING (per event) ── */}
       {activeEvTab==="ranking"&&(()=>{
-        const evRank = buildRank(data.players, scores);
+        // Compute scores ONLY for this event's questions
+        const evScores = computeScores([activeEv], data.answers, data.players);
+        const evRank = buildRank(data.players, evScores);
         const evPot = calcPot(activeEv.id, data.players, data.paid, activeEv.entryFee||10);
         const evPrizes = computePrizes(evRank, evPot);
+
+        const deletePlayer = async (pid) => {
+          if(!confirm("Spieler wirklich löschen? Alle Tipps dieses Spielers werden ebenfalls entfernt.")) return;
+          // Remove player
+          const newPlayers = data.players.filter(p=>p.id!==pid);
+          // Remove answers for this player
+          const newAnswers = Object.fromEntries(Object.entries(data.answers).filter(([k])=>!k.startsWith(pid+"_")));
+          // Remove paid entries for this player
+          const newPaid = Object.fromEntries(Object.entries(data.paid||{}).filter(([k])=>!k.includes("_"+pid)));
+          await persist({...data, players:newPlayers, answers:newAnswers, paid:newPaid});
+          toast$("Spieler gelöscht");
+        };
+
         return (
           <div className="card">
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
               <div className="ctitle" style={{marginBottom:0}}>Rangliste – {activeEv.title}</div>
               {evPot>0&&<div style={{fontSize:13,fontWeight:700,color:"var(--green)"}}>Pot: CHF {evPot}</div>}
             </div>
-            {evRank.length===0&&<div className="empty"><div className="ei">🏅</div><h3>Noch keine Punkte</h3></div>}
+            {evRank.length===0&&<div className="empty"><div className="ei">🏅</div><h3>Noch keine Spieler</h3></div>}
             {evRank.map((p,i)=>{
               const pc=p.rank===1?"rp1":p.rank===2?"rp2":p.rank===3?"rp3":"rpn";
               const ptc=p.rank===1?"rp1c":p.rank===2?"rp2c":p.rank===3?"rp3c":"rpnc";
               return (
-                <div key={p.id} className="rrow clickable" onClick={()=>openProfile(p.id)}>
+                <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 0",borderBottom:"1px solid var(--b)"}}>
                   <div className={`rpos ${pc}`}>{p.rank===1?"🥇":p.rank===2?"🥈":p.rank===3?"🥉":p.rank}</div>
-                  <div style={{flex:1}}>
+                  <div style={{flex:1,cursor:"pointer"}} onClick={()=>openProfile(p.id)}>
                     <div className="rname">{p.name}</div>
                     {evPrizes[p.id]&&<div style={{fontSize:12,fontWeight:600,marginTop:2,color:p.rank===1?"var(--gold)":p.rank===2?"var(--silver)":"var(--bronze)"}}>CHF {evPrizes[p.id].chf}</div>}
+                    {p.email&&<div style={{fontSize:11,color:"var(--t3)"}}>{p.email}</div>}
                   </div>
                   <div className={`rpts ${ptc}`}>{p.pts}</div>
-                  <div style={{fontSize:12,color:"var(--t3)"}}>›</div>
+                  <button
+                    title="Spieler löschen"
+                    onClick={()=>deletePlayer(p.id)}
+                    style={{background:"var(--rl)",border:"1px solid #f0c0bc",color:"var(--red)",borderRadius:8,padding:"5px 9px",fontSize:13,cursor:"pointer",flexShrink:0,fontWeight:600}}
+                  >🗑</button>
                 </div>
               );
             })}
